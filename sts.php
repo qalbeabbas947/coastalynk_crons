@@ -1,12 +1,13 @@
 <?php
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
-
+ini_set( "display_errors", "On" );
+error_reporting(E_ALL);
 require 'PHPMailer/src/Exception.php';
 require 'PHPMailer/src/PHPMailer.php';
 require 'PHPMailer/src/SMTP.php';
 require_once __DIR__ . '/common.php';
-global $table_prefix, $api_key;
+global $table_prefix;
 
 // Connect to database directly
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
@@ -15,33 +16,20 @@ if ($mysqli->connect_error) {
     die("Connection failed: " . $mysqli->connect_error);
 }
 
-function get_option_data( $option_name ) {
 
-    global $mysqli, $table_prefix;
-
-    $table_name = $table_prefix . 'options';
-    $sql = "select option_value from ".$table_name." where option_name='".$option_name."'";
-    $result = $mysqli->query($sql);
-    
-    if ($result && $result->num_rows > 0) {
-        $single_value = $result->fetch_column(); // Directly fetches the value of the first column
-    } else {
-       $single_value = '';
-    }
-    
-    return $single_value;
-}
-
+$api_key                        = get_option_data('coatalynk_datalastic_apikey');
 $siteurl                        = get_option_data('siteurl');
 $coatalynk_site_admin_email 	= get_option_data('coatalynk_site_admin_email');
-$coatalynk_site_admin_email 	= get_option_data('coatalynk_site_admin_email');
 $coatalynk_npa_admin_email 	    = get_option_data( 'coatalynk_npa_admin_email' );
+$coatalynk_finance_admin_email 	= get_option_data( 'coatalynk_finance_admin_email' );
+$coatalynk_nimasa_admin_email 	= get_option_data( 'coatalynk_nimasa_admin_email' );
+
 $coastalynk_sts_email_subject_original = get_option_data( 'coastalynk_sts_email_subject' );
-$coastalynk_sts_email_subject_original = !empty( $coastalynk_sts_email_subject_original ) ? $coastalynk_sts_email_subject_original : 'Coastalynk STS Alert - Lagos Offshore';
+$coastalynk_sts_email_subject_original = !empty( $coastalynk_sts_email_subject_original ) ? $coastalynk_sts_email_subject_original : 'Coastalynk STS Alert - [port]';
 $coastalynk_sts_body_original 	    = get_option_data( 'coastalynk_sts_body' );
 $strbody = "Dear Sir/Madam,
 <br>
-<p>This is an automatic notification from Coastalynk Maritime Intelligence regarding a Ship-to-Ship (STS) operation detected offshore Lagos.</p><br>
+<p>This is an automatic notification from Coastalynk Maritime Intelligence regarding a Ship-to-Ship (STS) operation detected at [port].</p><br>
 <h3>Event Summary:</h3>
 <p>Date/Time (UTC): [last_updated]</p>
 <p>Location: ([vessel1_lat], [vessel1_lon]) (Lagos Offshore)</p>
@@ -57,7 +45,7 @@ $strbody = "Dear Sir/Madam,
 <p>Name: [vessel2_name] | IMO: [vessel2_imo] | MMSI: [vessel2_mmsi]</p>
 <p>Type: [vessel2_type] | Flag: <img src='[vessel2_country_flag]' width='30px' alt='[vessel2_country_iso]' /></p>
 <p>Status: [vessel2_navigation_status]</p>
-<p>Current Draught: [vesseld_draught]</p>
+<p>Current Draught: [vessel2_draught]</p>
 <br><br>
 <p>View on Coastalynk Map(<a href='[sts-page-url]'>Click Here</a>)</p>
 <br>
@@ -131,6 +119,8 @@ if ($result = $mysqli -> query($sql)) {
         port VARCHAR(255) default '',
         port_id VARCHAR(50) default '',
         distance float default 0,
+        is_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
+        is_complete ENUM('No','Yes') NOT NULL DEFAULT 'No',
         last_updated TIMESTAMP,
         PRIMARY KEY (id)
     )";
@@ -138,12 +128,13 @@ if ($result = $mysqli -> query($sql)) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
-    if ($mysqli->query("TRUNCATE TABLE ".$table_name_sts.";") !== TRUE) {
-        echo "Error: " . $sql . "<br>" . $mysqli->error;
-    }
+    // if ($mysqli->query("TRUNCATE TABLE ".$table_name_sts.";") !== TRUE) {
+    //     echo "Error: " . $sql . "<br>" . $mysqli->error;
+    // }
 
     $types = ['Tanker', 'Tanker - Hazard A (Major)', 'Tanker - Hazard B', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard D (Recognizable)', 'Tanker: Hazardous category A', 'Tanker: Hazardous category B', 'Tanker: Hazardous category C', 'Tanker: Hazardous category D'];
-
+    $array_ids = [];
+    $array_uidds = [];
     foreach( $types as $type ) {
         while ( $obj = $result->fetch_object() ) {
             $url = sprintf(
@@ -177,7 +168,7 @@ if ($result = $mysqli -> query($sql)) {
                                 $v1_current_draught = get_datalastic_field($v2['uuid'], 'current_draught');
                                 $v2_current_draught = get_datalastic_field($v2['uuid'], 'current_draught');
 
-                                $sql = "select id from ".$table_name_sts." where ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' or vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) and ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' or vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' )";
+                                $sql = "select id, vessel1_uuid, is_email_sent from ".$table_name_sts." where ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' )";
                                 $result = $mysqli->query($sql);
                                 $num_rows = mysqli_num_rows($result);
                                 if( $num_rows == 0 ) {
@@ -216,6 +207,8 @@ if ($result = $mysqli -> query($sql)) {
                                     if ($mysqli->query($sql) !== TRUE) {
                                         echo "Error: " . $sql . "<br>" . $mysqli->error;
                                     } else {
+                                        $insert_id = $array_ids[] = $mysqli->insert_id;
+                                        $array_uidds[] = $v1['uuid'];
 
                                         $coastalynk_sts_body = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_body_original );
                                         $coastalynk_sts_body = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_body );
@@ -283,21 +276,23 @@ if ($result = $mysqli -> query($sql)) {
                                         $coastalynk_sts_email_subject = str_replace( "[port_id]", $obj->port_id, $coastalynk_sts_email_subject );
                                         $coastalynk_sts_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sts_email_subject );
 
-                                    $mail = new PHPMailer(true);
+                                        $mail = new PHPMailer(true);
                                         try {
                                             // Server settings
                                             $mail->isSMTP();
                                             $mail->Host       = 'smtp.gmail.com';
                                             $mail->SMTPAuth   = true;
-                                            $mail->Username   = 'noreplywebsitesmtp@gmail.com'; // Your Gmail address
-                                            $mail->Password   = 'tbbwozxclpncuukn'; // Generated App Password
+                                            $mail->Username   = smtp_user_name; // Your Gmail address
+                                            $mail->Password   = smtp_password; // Generated App Password
                                             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Use TLS encryption
                                             $mail->Port       = 587; // TCP port for TLS
 
                                             // Recipients
                                             $mail->setFrom('coastalynk@gmail.com', 'CoastaLynk');
-                                            $mail->addAddress($coatalynk_site_admin_email, 'CoastaLynk');
-                                            $mail->addAddress($coatalynk_npa_admin_email, 'CoastaLynk');
+                                            $mail->addAddress( $coatalynk_site_admin_email, 'CoastaLynk' );
+                                            $mail->addAddress( $coatalynk_npa_admin_email, 'NPA' );
+                                            $mail->addAddress( $coatalynk_finance_admin_email, 'Finance Department' );
+                                            $mail->addAddress( $coatalynk_nimasa_admin_email, 'NIMASA' );
 
                                             // Content
                                             $mail->isHTML(true); // Set email format to HTML
@@ -306,21 +301,33 @@ if ($result = $mysqli -> query($sql)) {
                                             $mail->AltBody = strip_tags($coastalynk_sts_body);
 
                                             $mail->send();
+
+                                            $sql = "update ".$table_name_sts." set is_email_sent='Yes' where id='".$insert_id."'";
+                                            $mysqli->query($sql);
+
                                             echo 'Email sent successfully!';
                                         } catch (Exception $e) {
                                             echo "Email could not be sent. Error: {$mail->ErrorInfo}";
                                         }
                                     }
+                                } else {
+                                    $row = mysqli_fetch_assoc($result);
+                                    $array_ids[] = $row['id'];
+                                    $array_uidds[] = $row['vessel1_uuid'];
                                 }
-                                
-                                
-                                
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+
+    if( count($array_ids) > 0 ) {
+        $array_ids = implode(',', $array_ids);
+        $sql = "update ".$table_name_sts." set is_complete='Yes' where is_complete='No' and id not in (".$array_ids.")";
+        $mysqli->query($sql);
     }
 }
 
