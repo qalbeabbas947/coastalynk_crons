@@ -75,6 +75,34 @@ Leavy Data:<br>
 <p>Coastalynk Maritime Intelligence</p>";
 $coastalynk_sbm_complete_body_original = !empty( $coastalynk_sbm_complete_body ) ? $coastalynk_sbm_complete_body : $coastalynk_sbm_complete_email_default;
 
+/**
+ * Default no operation email data
+ */
+$coastalynk_sbm_no_opt_email_subject  = get_option_data( 'coastalynk_sbm_no_opt_email_subject' );
+$coastalynk_sbm_no_opt_email_subject_original = !empty( $coastalynk_sbm_no_opt_email_subject ) ? $coastalynk_sbm_no_opt_email_subject : 'Coastalynk SBM No Operation Alert - [port]';
+
+$coastalynk_sbm_no_opt_body  = get_option_data( 'coastalynk_sbm_no_opt_body' );
+$coastalynk_sbm_no_opt_body_default  = "Dear Sir/Madam,
+                                            <br>
+                                            <p>This is an automatic notification from Coastalynk Maritime Intelligence regarding a Single Buoy Mooring (sbm) operation detected but not performed at [port].</p><br>
+                                            <h3>General Detail:</h3>
+                                            <p>Date/Time (UTC): [last_updated]</p>
+                                            <p>Location: ([lat], [lon]) (Lagos Offshore)</p>
+                                            <p>Distance Between Vessels: [distance]</p>
+                                            <p>Port Reference: [port]</p>
+                                            <h3>Vessel Detail</h3>
+                                            <p>Name: [name] | IMO: [imo] | MMSI: [mmsi]</p>
+                                            <p>Type: [type] | Flag: <img src='[country_flag]' width='30px' alt='[country_iso]' /></p>
+                                            <p>Status: [navigation_status]</p>
+                                            <p>Draught: [draught]</p>
+                                            <p>View on Coastalynk Map(<a href='[sbm-page-url]'>Click Here</a>)</p>
+                                            <br>
+                                            <p>This notification is part of Coastalynk\'s effort to provide real-time intelligence to support anti-bunkering enforcement, maritime security, and revenue protection.</p>
+                                            <br>
+                                            <p>Regards,</p>
+                                            <p>Coastalynk Maritime Intelligence</p>";
+$coastalynk_sbm_no_opt_body_original = !empty( $coastalynk_sbm_no_opt_body ) ? $coastalynk_sbm_no_opt_body : $coastalynk_sbm_no_opt_body_default;
+
 
 function haversineDistance($lat1, $lon1, $lat2, $lon2, $unit = 'meters') {
     // Validate coordinates
@@ -327,74 +355,124 @@ if ($result = $mysqli -> query($sql)) {
     $result = $mysqli->query($sql);
     $num_rows = mysqli_num_rows($result);
     if( $num_rows > 0 ) {
+
         while ( $v1 = mysqli_fetch_assoc($result) ) {
             $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
             $sql = "update ".$table_name_sbm." set is_offloaded='Yes', completed_draught='".$current_draught."' where id = '".$v1['id']."'";
             $mysqli->query($sql);
+            
+            $subject = '';
+            $body = '';
 
-            $coastalynk_sbm_complete_body = str_replace( "[uuid]", $v1['uuid'], $coastalynk_sbm_complete_body_original );
-            $coastalynk_sbm_complete_body = str_replace( "[name]", $v1['name'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[type]", $v1['type'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[before_draught]", $v1['draught'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[after_draught]", $current_draught, $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_complete_body );            
-            $coastalynk_sbm_complete_body = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_body );
-            $coastalynk_sbm_complete_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_body ); 
+            if( floatval( $v1['draught'] ) == floatval( $current_draught ) ) {
+                
+                $coastalynk_sbm_no_opt_body = str_replace( "[uuid]", $v1['uuid'], $coastalynk_sbm_no_opt_body_original );
+                $coastalynk_sbm_no_opt_body = str_replace( "[name]", $v1['name'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[type]", $v1['type'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[draught]", $v1['draught'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_no_opt_body );            
+                $coastalynk_sbm_no_opt_body = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[port]", $v1['port'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_no_opt_body );
+                $coastalynk_sbm_no_opt_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_no_opt_body ); 
+                $body = $coastalynk_sbm_no_opt_body;
 
-            $coastalynk_sbm_complete_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_complete_email_subject_original );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[type]", $v1['type'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[before_draught]", $v1['draught'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[after_draught]", $current_draught, $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_complete_email_subject );            
-            $coastalynk_sbm_complete_email_subject = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_email_subject );
-            $coastalynk_sbm_complete_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_email_subject ); 
-           
-            $draught = abs( floatval( $v1['draught'] ) - floatval( $current_draught ) );
-            $leavy_data = '';
-            $total = 0;
-            $cargo_dues = ( $draught * 6.79 );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_no_opt_email_subject_original );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[type]", $v1['type'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[draught]", $v1['draught'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_no_opt_email_subject );            
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[port]", $v1['port'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_no_opt_email_subject );
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_no_opt_email_subject ); 
+                $subject = $coastalynk_sbm_no_opt_email_subject;
+            } else {
 
-            $total += $cargo_dues;
-            $leavy_data .= 'NPA cargo dues (liquid bulk): $'.$cargo_dues.'/ton<br>';
+                $coastalynk_sbm_complete_body = str_replace( "[uuid]", $v1['uuid'], $coastalynk_sbm_complete_body_original );
+                $coastalynk_sbm_complete_body = str_replace( "[name]", $v1['name'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[type]", $v1['type'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[before_draught]", $v1['draught'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[after_draught]", $current_draught, $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_complete_body );            
+                $coastalynk_sbm_complete_body = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_body );
+                $coastalynk_sbm_complete_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_body ); 
+                
 
-            $sbm_spm_harbour = ( $draught * 1.39 );
-            $total += $sbm_spm_harbour;
+                $coastalynk_sbm_complete_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_complete_email_subject_original );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[type]", $v1['type'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[navigation_status]", $v1['navigation_status'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[before_draught]", $v1['draught'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[after_draught]", $current_draught, $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_complete_email_subject );            
+                $coastalynk_sbm_complete_email_subject = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_email_subject ); 
+                $subject = $coastalynk_sbm_complete_email_subject;
 
-            $leavy_data .= 'SBM/SPM harbour dues: $'.$sbm_spm_harbour.'/ton<br>';
+                $draught = abs( floatval( $v1['draught'] ) - floatval( $current_draught ) );
+                $leavy_data = '';
+                $total = 0;
+                $cargo_dues = ( $draught * 6.79 );
 
-            $env_leavy = ( $draught * 0.12 );
-            $total += $env_leavy;
-            $leavy_data .= 'Environmental levy: $'. $env_leavy.'/ton<br>';
+                $total += $cargo_dues;
+                $leavy_data .= 'NPA cargo dues (liquid bulk): $'.$cargo_dues.'/ton<br>';
 
-            $polution_leavy = ( $draught * 0.10 );
-            $total += $polution_leavy;
-            $leavy_data .= 'NIMASA pollution levy: $'.$polution_leavy.'/ton<br>';
-            $leavy_data .= 'NIMASA wet cargo levy: 3% of freight value<br>';
-            $leavy_data .= 'Total levy: $'.$total.'/ton<br>';
+                $sbm_spm_harbour = ( $draught * 1.39 );
+                $total += $sbm_spm_harbour;
 
-            $coastalynk_sbm_complete_body = str_replace( "[Leavy_data]", $leavy_data, $coastalynk_sbm_complete_body ); 
+                $leavy_data .= 'SBM/SPM harbour dues: $'.$sbm_spm_harbour.'/ton<br>';
+
+                $env_leavy = ( $draught * 0.12 );
+                $total += $env_leavy;
+                $leavy_data .= 'Environmental levy: $'. $env_leavy.'/ton<br>';
+
+                $polution_leavy = ( $draught * 0.10 );
+                $total += $polution_leavy;
+                $leavy_data .= 'NIMASA pollution levy: $'.$polution_leavy.'/ton<br>';
+                $leavy_data .= 'NIMASA wet cargo levy: 3% of freight value<br>';
+                $leavy_data .= 'Total levy: $'.$total.'/ton<br>';
+
+                $coastalynk_sbm_complete_body = str_replace( "[Leavy_data]", $leavy_data, $coastalynk_sbm_complete_body ); 
+                $body = $coastalynk_sbm_complete_body;
+            }
 
             $mail = new PHPMailer(true);
             try {
@@ -416,9 +494,9 @@ if ($result = $mysqli -> query($sql)) {
 
                 // Content
                 $mail->isHTML(true); // Set email format to HTML
-                $mail->Subject = $coastalynk_sbm_complete_email_subject;
-                $mail->Body    = $coastalynk_sbm_complete_body;
-                $mail->AltBody = strip_tags($coastalynk_sbm_complete_body);
+                $mail->Subject = $subject;
+                $mail->Body    = $body;
+                $mail->AltBody = strip_tags($body);
 
                 $mail->send();
 
