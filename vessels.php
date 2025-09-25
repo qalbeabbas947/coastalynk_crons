@@ -1,7 +1,7 @@
 <?php
 set_time_limit(0);
-ini_set( "display_errors", "On" );
-error_reporting(E_ALL);
+// ini_set( "display_errors", "On" );
+// error_reporting(E_ALL);
 
 require_once __DIR__ . '/common.php';
 global $table_prefix;
@@ -12,7 +12,7 @@ if ($mysqli->connect_error) {
     die("Connection failed: " . $mysqli->connect_error);
 }
 
-$api_key                        = get_option_data('coatalynk_datalastic_apikey');
+$api_key = get_option_data('coatalynk_datalastic_apikey');
 
 // Connect to database directly
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);

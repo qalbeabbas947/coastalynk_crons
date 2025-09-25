@@ -1,8 +1,9 @@
 <?php
+set_time_limit(0);
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
-ini_set( "display_errors", "On" );
-error_reporting(E_ALL);
+// ini_set( "display_errors", "On" );
+// error_reporting(E_ALL);
 require 'PHPMailer/src/Exception.php';
 require 'PHPMailer/src/PHPMailer.php';
 require 'PHPMailer/src/SMTP.php';
@@ -164,8 +165,9 @@ function get_datalastic_field( $uuid, $field = 'navigation_status' ) {
 }
 
 $table_name = $table_prefix . 'coastalynk_ports';
-$sql = "select * from ".$table_name." where port_type='Offshore Terminal'";
+$sql = "select * from ".$table_name." where country_iso='NG' and port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' order by title";
 $candidates = [];
+$idex = 0;
 if ($result = $mysqli -> query($sql)) {
     
     $table_name_sbm = $table_prefix . 'coastalynk_sbm';
@@ -189,6 +191,7 @@ if ($result = $mysqli -> query($sql)) {
         last_position_UTC TIMESTAMP,
         port VARCHAR(255) default '',
         port_id VARCHAR(50) default '',
+        port_type VARCHAR(50) default '',
         distance float default 0,
         is_offloaded ENUM('No','Yes') NOT NULL DEFAULT 'No',
         is_start_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
@@ -208,8 +211,9 @@ if ($result = $mysqli -> query($sql)) {
     $types = ['Tanker', 'Tanker - Hazard A (Major)', 'Tanker - Hazard B', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard D (Recognizable)', 'Tanker: Hazardous category A', 'Tanker: Hazardous category B', 'Tanker: Hazardous category C', 'Tanker: Hazardous category D'];
     $array_ids = [];
     $array_uidds = [];
-    foreach( $types as $type ) {
-        while ( $obj = $result->fetch_object() ) {
+    while ( $obj = $result->fetch_object() ) {
+        foreach( $types as $type ) {
+
             $url = sprintf(
                 "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%f&type=%s",
                 urlencode($api_key),
@@ -225,138 +229,144 @@ if ($result = $mysqli -> query($sql)) {
             $vessels = $data['data']['vessels'];
 
             // Check proximity
-            foreach ($vessels as $v1) {
-                $sql = "select id, uuid, is_start_email_sent from ".$table_name_sbm." where is_offloaded='No' and uuid='".$mysqli->real_escape_string($v1['uuid'])."'";
-                $result = $mysqli->query($sql);
-                $num_rows = mysqli_num_rows($result);
-                if( $num_rows == 0 ) {
+            if( is_array( $vessels ) && count( $vessels ) > 0 ) {
+                foreach ($vessels as $v1) {
+                    $sql = "select id, uuid, is_start_email_sent from ".$table_name_sbm." where port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' and is_offloaded='No' and uuid='".$mysqli->real_escape_string($v1['uuid'])."'";
+                    $checkresult = $mysqli->query($sql);
+                    $num_rows = mysqli_num_rows($checkresult);
+                    
+                    if( $num_rows == 0 ) {
 
-                        $navigation_status = get_datalastic_field($v1['uuid']);
-                        $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
-                        $dist = haversineDistance($v1['lat'], $v1['lon'], $obj->lat, $obj->lon);
-                        $sql = "INSERT INTO $table_name_sbm (uuid , name, mmsi, imo, country_iso, type, type_specific, lat, lon,speed,navigation_status, draught, last_position_UTC, distance, port, port_id, last_updated)
-                        VALUES (
-                                '" . $mysqli->real_escape_string($v1['uuid']) . "',
-                                '" . $mysqli->real_escape_string($v1['name']) . "',
-                                '" . $mysqli->real_escape_string($v1['mmsi']) . "',
-                                '" . $mysqli->real_escape_string($v1['imo']) . "',
-                                '" . $mysqli->real_escape_string($v1['country_iso']) . "',
-                                '" . $mysqli->real_escape_string($v1['type']) . "',
-                                '" . $mysqli->real_escape_string($v1['type_specific']) . "',
-                                '" . $mysqli->real_escape_string($v1['lat']) . "',
-                                '" . $mysqli->real_escape_string($v1['lon']) . "',
-                                '" . floatval($v1['speed']) . "',
-                                '" . $navigation_status . "',
-                                '" . $current_draught . "',
-                                '" . date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) . "',
-                                '" . floatval($dist) . "',
-                                '" . $mysqli->real_escape_string($obj->title) . "',
-                                '" . $mysqli->real_escape_string($obj->port_id) . "',
-                                    NOW())";
-                        if ($mysqli->query($sql) !== TRUE) {
-                            echo "Error: " . $sql . "<br>" . $mysqli->error;
-                        } else {
-                            $insert_id = $array_ids[] = $mysqli->insert_id;
-                            $array_uidds[] = $v1['uuid'];
-                            
-                            $coastalynk_sbm_body = str_replace( "[uuid]", $v1['uuid'], $coastalynk_sbm_body_original );
-                            $coastalynk_sbm_body = str_replace( "[name]", $v1['name'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[type]", $v1['type'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[navigation_status]", $navigation_status, $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[draught]", $current_draught, $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_body );            
-                            $coastalynk_sbm_body = str_replace( "[distance]", $dist, $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[port]", $obj->title, $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[port_id]", $obj->port_id, $coastalynk_sbm_body );
-                            $coastalynk_sbm_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_body ); 
+                            $navigation_status = get_datalastic_field($v1['uuid']);
+                            $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
+                            $dist = haversineDistance($v1['lat'], $v1['lon'], $obj->lat, $obj->lon);
+                            $sql = "INSERT INTO $table_name_sbm (uuid , name, mmsi, imo, country_iso, type, type_specific, lat, lon,speed,navigation_status, draught, last_position_UTC, distance, port, port_id, port_type, last_updated)
+                            VALUES (
+                                    '" . $mysqli->real_escape_string($v1['uuid']) . "',
+                                    '" . $mysqli->real_escape_string($v1['name']) . "',
+                                    '" . $mysqli->real_escape_string($v1['mmsi']) . "',
+                                    '" . $mysqli->real_escape_string($v1['imo']) . "',
+                                    '" . $mysqli->real_escape_string($v1['country_iso']) . "',
+                                    '" . $mysqli->real_escape_string($v1['type']) . "',
+                                    '" . $mysqli->real_escape_string($v1['type_specific']) . "',
+                                    '" . $mysqli->real_escape_string($v1['lat']) . "',
+                                    '" . $mysqli->real_escape_string($v1['lon']) . "',
+                                    '" . floatval($v1['speed']) . "',
+                                    '" . $navigation_status . "',
+                                    '" . $current_draught . "',
+                                    '" . date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) . "',
+                                    '" . floatval($dist) . "',
+                                    '" . $mysqli->real_escape_string($obj->title) . "',
+                                    '" . $mysqli->real_escape_string($obj->port_id) . "',
+                                    '" . $mysqli->real_escape_string($obj->port_type) . "',
+                                        NOW())";
+                            if ($mysqli->query($sql) !== TRUE) {
+                                echo "Error: " . $sql . "<br>" . $mysqli->error;
+                            } else {
+                                $insert_id = $array_ids[] = $mysqli->insert_id;
+                                $array_uidds[] = $v1['uuid'];
+                                
+                                $coastalynk_sbm_body = str_replace( "[uuid]", $v1['uuid'], $coastalynk_sbm_body_original );
+                                $coastalynk_sbm_body = str_replace( "[name]", $v1['name'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[type]", $v1['type'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[navigation_status]", $navigation_status, $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[draught]", $current_draught, $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[sbm-page-url]", $siteurl.'/sbm-map/', $coastalynk_sbm_body );            
+                                $coastalynk_sbm_body = str_replace( "[distance]", $dist, $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[port]", $obj->title, $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[port_id]", $obj->port_id, $coastalynk_sbm_body );
+                                $coastalynk_sbm_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_body ); 
 
-                            $coastalynk_sbm_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_email_subject_original );
-                            $coastalynk_sbm_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[type]", $v1['type'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[navigation_status]", $navigation_status, $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[draught]", $current_draught, $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[sbm-page-url]", $siteurl.'//', $coastalynk_sbm_email_subject );            
-                            $coastalynk_sbm_email_subject = str_replace( "[distance]", $dist, $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[port]", $obj->title, $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[port_id]", $obj->port_id, $coastalynk_sbm_email_subject );
-                            $coastalynk_sbm_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_email_subject ); 
+                                $coastalynk_sbm_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_email_subject_original );
+                                $coastalynk_sbm_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[imo]", $v1['imo'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[country_iso]", $v1['country_iso'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[type]", $v1['type'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[type_specific]", $v1['type_specific'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[lat]", $v1['lat'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[lon]", $v1['lon'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[speed]", $v1['speed'], $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[navigation_status]", $navigation_status, $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[draught]", $current_draught, $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[sbm-page-url]", $siteurl.'//', $coastalynk_sbm_email_subject );            
+                                $coastalynk_sbm_email_subject = str_replace( "[distance]", $dist, $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[port]", $obj->title, $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[port_id]", $obj->port_id, $coastalynk_sbm_email_subject );
+                                $coastalynk_sbm_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_email_subject ); 
 
-                            $mail = new PHPMailer(true);
-                            try {
-                                // Server settings
-                                $mail->isSMTP();
-                                $mail->Host       = 'smtp.gmail.com';
-                                $mail->SMTPAuth   = true;
-                                $mail->Username   = smtp_user_name; // Your Gmail address
-                                $mail->Password   = smtp_password; // Generated App Password
-                                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Use TLS encryption
-                                $mail->Port       = 587; // TCP port for TLS
+                                $mail = new PHPMailer(true);
+                                try {
+                                    // Server settings
+                                    $mail->isSMTP();
+                                    $mail->Host       = 'smtp.gmail.com';
+                                    $mail->SMTPAuth   = true;
+                                    $mail->Username   = smtp_user_name; // Your Gmail address
+                                    $mail->Password   = smtp_password; // Generated App Password
+                                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Use TLS encryption
+                                    $mail->Port       = 587; // TCP port for TLS
 
-                                // Recipients
-                                $mail->setFrom('coastalynk@gmail.com', 'CoastaLynk');
-                                $mail->addAddress($coatalynk_site_admin_email, 'CoastaLynk');
-                                $mail->addAddress($coatalynk_npa_admin_email, 'NPA');
-                                $mail->addAddress($coatalynk_finance_admin_email, 'Finance Department');
-                                $mail->addAddress($coatalynk_nimasa_admin_email, 'NIMASA');
+                                    // Recipients
+                                    $mail->setFrom('coastalynk@gmail.com', 'CoastaLynk');
+                                    $mail->addAddress($coatalynk_site_admin_email, 'CoastaLynk');
+                                    $mail->addAddress($coatalynk_npa_admin_email, 'NPA');
+                                    $mail->addAddress($coatalynk_finance_admin_email, 'Finance Department');
+                                    $mail->addAddress($coatalynk_nimasa_admin_email, 'NIMASA');
 
 
-                                // Content
-                                $mail->isHTML(true); // Set email format to HTML
-                                $mail->Subject = $coastalynk_sbm_email_subject;
-                                $mail->Body    = $coastalynk_sbm_body;
-                                $mail->AltBody = strip_tags($coastalynk_sbm_body);
+                                    // Content
+                                    $mail->isHTML(true); // Set email format to HTML
+                                    $mail->Subject = $coastalynk_sbm_email_subject;
+                                    $mail->Body    = $coastalynk_sbm_body;
+                                    $mail->AltBody = strip_tags($coastalynk_sbm_body);
 
-                                $mail->send();
+                                    $mail->send();
 
-                                $sql = "update ".$table_name_sbm." set is_start_email_sent='Yes' where id='".$insert_id."'";
-                                $mysqli->query($sql);
-                                echo 'Email sent successfully!';
-                            } catch (Exception $e) {
-                                echo "Email could not be sent. Error: {$mail->ErrorInfo}";
+                                    $sql = "update ".$table_name_sbm." set is_start_email_sent='Yes' where id='".$insert_id."'";
+                                    $mysqli->query($sql);
+                                    echo 'Email sent successfully!';
+                                } catch (Exception $e) {
+                                    echo "Email could not be sent. Error: {$mail->ErrorInfo}";
+                                }
                             }
+                    } else{
+                        $row = mysqli_fetch_assoc($checkresult);
+                        $array_ids[] = $row['id'];
+                        $array_uidds[] = $row['uuid'];
+                        if( intval( $row['id'] ) > 0 ) {
+                            $sql = "update ".$table_name_sbm." set lat='".$v1['lat']."', lon='".$v1['lon']."' where id='".$row['id']."'";
+                            $mysqli->query($sql);
                         }
-                } else{
-                    $row = mysqli_fetch_assoc($result);
-                    $array_ids[] = $row['id'];
-                    $array_uidds[] = $row['uuid'];
-                    if( intval( $row['id'] ) > 0 ) {
-                        $sql = "update ".$table_name_sbm." set lat='".$v1['lat']."', lon='".$v1['lon']."' where id='".$row['id']."'";
-                        $mysqli->query($sql);
                     }
+
+                    $checkresult->free(); // Free the result set
                 }
             }
         }
     }
 
-    $sql = "select * from ".$table_name_sbm." where is_offloaded='No'";
-    $result = $mysqli->query($sql);
-    $num_rows = mysqli_num_rows($result);
+    $sql = "select * from ".$table_name_sbm." where port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' and is_offloaded='No'";
+    $result2 = $mysqli->query($sql);
+    $num_rows = mysqli_num_rows($result2);
     if( count($array_ids) > 0 ) {
         $array_ids = implode(',', $array_ids);
-        $sql = "select * from ".$table_name_sbm." where is_offloaded='No' and id not in (".$array_ids.")";
-        
+        $sql = "select * from ".$table_name_sbm." where port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' and is_offloaded='No' and id not in (".$array_ids.")";
     }
+    $result2->free();
 
-    $result = $mysqli->query($sql);
-    $num_rows = mysqli_num_rows($result);
+    $result3 = $mysqli->query($sql);
+    $num_rows = mysqli_num_rows($result3);
     if( $num_rows > 0 ) {
 
-        while ( $v1 = mysqli_fetch_assoc($result) ) {
+        while ( $v1 = mysqli_fetch_assoc($result3) ) {
             $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
             $sql = "update ".$table_name_sbm." set is_offloaded='Yes', completed_draught='".$current_draught."' where id = '".$v1['id']."'";
             $mysqli->query($sql);
@@ -509,6 +519,8 @@ if ($result = $mysqli -> query($sql)) {
             
         }
     }
+
+    $result3->free();
 }
 
 $result->free(); // Free the result set
