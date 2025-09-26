@@ -1,4 +1,6 @@
 <?php
+
+set_time_limit(0);
 ini_set( "display_errors", "On" );
 error_reporting(E_ALL);
 
@@ -79,7 +81,6 @@ if( $num_rows > 0 ) {
             foreach( $vessels as $vessel ) {
                 
                 sleep(1);
-                echo "<br>vesselID: " . $vessel['uuid'] . ", vesselName: " . $vessel['name']. ", mmsi: " . $vessel['mmsi'] . ", imo: " . $vessel['imo'] . "<br>";
                 $url = "https://api.datalastic.com/api/v0/vessel_history?api-key=$api_key&uuid=".$vessel['uuid']."&from=" . date('Y-m-d', strtotime("-7 days"));
                 $response = file_get_contents($url);
                 $data = json_decode($response, true);
@@ -96,34 +97,43 @@ if( $num_rows > 0 ) {
 
                         $signal_disappeared = checkSignalDisappearance( $previousPosition, $lastPosition, $row['lat'], $row['lon'] );
                         if( !empty( $signal_disappeared ) ) {
-                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".number_format($vessel['distance'])." near ".$row['title']." zone.";
-                            $reason_type = $signal_disappeared;
-                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['port_id'], $row['title']);
+                            $disappear_data = explode('|', $signal_disappeared);
+                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".coastalynk_display_time($disappear_data[1])." near ".$row['title']." zone.";
+                            $reason_type = $disappear_data[0];
+                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['title'], $row['port_id']);
                         }
                     }
 
                     if( $row['port_type'] == 'Offshore Terminal' ) {  //SBM Area
-                        if ( checkUnrealisticSBMMovement( $positions, $row['lat'], $row['lon'] ) ) {
-                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".number_format($vessel['distance'])." near ".$row['title']." SBM zone.";
+                        if ( $diff = checkUnrealisticSBMMovement( $positions, $row['lat'], $row['lon'] ) ) {
+                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".coastalynk_display_time($diff)." near ".$row['title']." SBM zone.";
                             $reason_type = 'SBM Area';
-                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['port_id'], $row['title']);
+                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['title'], $row['port_id']);
                         
                         }
                     }
 
                     if( count( $STS_Zones ) > 0 ) {
-                        if ( checkUnrealisticSTSMovement( $positions ) ) {
-                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".number_format($vessel['distance'])." near ".$row['title']." STS zone.";
+                        if ( $diff = checkUnrealisticSTSMovement( $positions ) ) {
+                            $reason = "Possible dark ship - last seen ".date('H:i', strtotime($vessel['last_position_UTC']))." UTC, gap ".coastalynk_display_time($diff)." near ".$row['title']." STS zone.";
                             $reason_type = 'STS Area';
-                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['port_id'], $row['title']);
+                            add_dark_ships($vessel['uuid'], $vessel['name'], $vessel['mmsi'], $vessel['imo'], $vessel['country_iso'], $vessel['type'], $vessel['type_specific'], $reason, $reason_type, $vessel['lat'], $vessel['lon'], $vessel['last_position_UTC'], $vessel['distance'], $row['title'], $row['port_id']);
                         
                         }
                     }
                 }
             }
-
+            
             sleep(1);
     }
+}
+
+function coastalynk_display_time( $diff_seconds ) {
+
+    $hours = floor($diff_seconds / 3600);
+    $minutes = floor(($diff_seconds % 3600) / 60);
+
+    return "$hours hrs $minutes min";
 }
 
 /**
@@ -137,23 +147,24 @@ function add_dark_ships($uuid, $name, $mmsi, $imo, $country_iso, $type, $type_sp
     $result = $mysqli->query($sql);
     $num_rows = mysqli_num_rows($result);
     if( $num_rows == 0 ) {
+        
         $sql = "INSERT INTO $table_name_dark_ships (uuid , name, mmsi, imo, country_iso, type, type_specific,reason,reason_type, lat, lon, last_position_UTC, distance, port, port_id, last_updated)
                 VALUES (
-                    '" . $mysqli->real_escape_string($uuid) . "',
-                    '" . $mysqli->real_escape_string($name) . "',
-                    '" . $mysqli->real_escape_string($mmsi) . "',
-                    '" . $mysqli->real_escape_string($imo) . "',
-                    '" . $mysqli->real_escape_string($country_iso) . "',
-                    '" . $mysqli->real_escape_string($type) . "',
-                    '" . $mysqli->real_escape_string($type_specific) . "',
-                    '" . $mysqli->real_escape_string($reason) . "',
-                    '" . $mysqli->real_escape_string($reason_type) . "',
-                    '" . $mysqli->real_escape_string($lat) . "',
-                    '" . $mysqli->real_escape_string($lon) . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($uuid):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($name):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($mmsi):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($imo):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($country_iso):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($type):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($type_specific):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($reason):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($reason_type):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($lat):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($lon):'') . "',
                     '" . date('Y-m-d H:i:s', strtotime($last_position_UTC)) . "',
-                    '" . $mysqli->real_escape_string($distance) . "',
-                    '" . $mysqli->real_escape_string($port) . "',
-                    '" . $mysqli->real_escape_string($port_id) . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($distance):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($port):'') . "',
+                    '" . (!empty($uuid)?$mysqli->real_escape_string($port_id):'') . "',
                     NOW())";
         if ($mysqli->query($sql) !== TRUE) {
             echo "Error: " . $sql . "<br>" . $mysqli->error;
@@ -181,13 +192,13 @@ function checkUnrealisticSTSMovement($positions) {
             foreach ($STS_Zones as $zone) {
                 $distance = calculateDistance($current['lat'], $current['lon'], $zone['lat'], $zone['lon']);
                 if ($distance < $zone['radius']) {
-                    return true;
+                    return $timeDiff;
                 }
             }
         }
     }
     
-    return false;
+    return 0;
 }
 
 function checkUnrealisticSBMMovement($positions, $port_lat, $port_lon) {
@@ -210,12 +221,12 @@ function checkUnrealisticSBMMovement($positions, $port_lat, $port_lon) {
 
             $distance = calculateDistance($current['lat'], $current['lon'], $port_lat, $port_lon);
             if ($distance < $SBM_Zone_Radius) {
-                return true;
+                return $timeDiff;
             }
         }
     }
     
-    return false;
+    return 0;
 }
 
 /**
@@ -246,7 +257,7 @@ function checkSignalDisappearance($lastPos, $prevPos, $port_lat, $port_lon) {
     if ($timeDiff > $timeout) {
         // Check if it's not a poor reception area
         if (!isPoorReceptionArea($lastPos['lat'], $lastPos['lon'])) {
-            return $isCoastal? 'Coastal' : 'offshore';
+            return $isCoastal? 'Coastal|'.$timeDiff : 'offshore|'.$timeDiff;
         }
     }
     
