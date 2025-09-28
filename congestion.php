@@ -45,7 +45,11 @@ function wpdocs_show_vessels_congestion(  ) {
     } else {
         echo "Error creating table: " . $mysqli->error . "<br>";
     }
-    $mysqli->query("Truncate table ".$table_prefix."port_congestion");
+    
+    if ($mysqli->query("Delete from ".$table_prefix."port_congestion where DATE(updated_at) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
+        echo "Error: " . $sql . "<br>" . $mysqli->error;
+    }
+
     $primary_key = 1;
     foreach( $ports as $name => $portdata ) {
         $lat = $portdata[0];

@@ -2,8 +2,8 @@
 set_time_limit(0);
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
-// ini_set( "display_errors", "On" );
-// error_reporting(E_ALL);
+ini_set( "display_errors", "On" );
+error_reporting(E_ALL);
 require 'PHPMailer/src/Exception.php';
 require 'PHPMailer/src/PHPMailer.php';
 require 'PHPMailer/src/SMTP.php';
@@ -164,8 +164,14 @@ function get_datalastic_field( $uuid, $field = 'navigation_status' ) {
     return $data['data'][$field];
 }
 
+$port_type = 'Offshore Terminal';
+if( !isset( $_REQUEST['port_type'] ) && !empty( $_REQUEST['port_type'] ) ) {
+    $port_type = $mysqli->real_escape_string($_REQUEST['port_type']);
+}
+
 $table_name = $table_prefix . 'coastalynk_ports';
-$sql = "select * from ".$table_name." where country_iso='NG' and port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' order by title";
+$sql = "select * from ".$table_name." where country_iso='NG' and port_type='".$port_type."' order by title";
+
 $candidates = [];
 $idex = 0;
 if ($result = $mysqli -> query($sql)) {
@@ -204,9 +210,9 @@ if ($result = $mysqli -> query($sql)) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
-    // if ($mysqli->query("TRUNCATE TABLE ".$table_name_sbm.";") !== TRUE) {
-    //     echo "Error: " . $sql . "<br>" . $mysqli->error;
-    // }
+    if ($mysqli->query("Delete from ".$table_name_sbm." where DATE(last_updated) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
+        echo "Error: " . $sql . "<br>" . $mysqli->error;
+    }
 
     $types = ['Tanker', 'Tanker - Hazard A (Major)', 'Tanker - Hazard B', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard D (Recognizable)', 'Tanker: Hazardous category A', 'Tanker: Hazardous category B', 'Tanker: Hazardous category C', 'Tanker: Hazardous category D'];
     $array_ids = [];

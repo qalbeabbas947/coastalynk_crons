@@ -129,9 +129,9 @@ if ($result = $mysqli -> query($sql)) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
-    // if ($mysqli->query("TRUNCATE TABLE ".$table_name_sts.";") !== TRUE) {
-    //     echo "Error: " . $sql . "<br>" . $mysqli->error;
-    // }
+    if ($mysqli->query("Delete from ".$table_name_sts." where DATE(last_updated) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
+        echo "Error: " . $sql . "<br>" . $mysqli->error;
+    }
 
     $types = ['Tanker', 'Tanker - Hazard A (Major)', 'Tanker - Hazard B', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard D (Recognizable)', 'Tanker: Hazardous category A', 'Tanker: Hazardous category B', 'Tanker: Hazardous category C', 'Tanker: Hazardous category D'];
     $array_ids = [];
