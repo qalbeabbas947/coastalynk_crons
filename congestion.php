@@ -1,17 +1,14 @@
 <?php
+set_time_limit(0);
 ini_set( "display_errors", "On" );
 error_reporting(E_ALL);
+
+require_once __DIR__ . '/common.php';
+$mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 wpdocs_show_vessels_congestion( ) ;
 function wpdocs_show_vessels_congestion(  ) {
-    define( 'DB_NAME', "mydb" );
 
-    /** Database username */
-    define( 'DB_USER', "root" );
-
-    /** Database password */
-    define( 'DB_PASSWORD', "root" );
-    define( 'DB_HOST', 'db:3306' );
-
+    global $mysqli;
     $ports = [
         'Apapa' => [6.45, 3.36],
         'TinCanIsland' => [6.44, 3.34],
@@ -23,15 +20,16 @@ function wpdocs_show_vessels_congestion(  ) {
 
     $table_prefix = 'staging_';
     // Connect to database directly
-    $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
-
+    
+    $api_key  = get_option_data('coatalynk_datalastic_apikey');
+    
     if ($mysqli->connect_error) {
         die("Connection failed: " . $mysqli->connect_error);
     } else {
         echo 'connected successfully!';
     }
 
-    $sql_create_table = "CREATE TABLE IF NOT EXISTS ".$table_prefix."port_congestion (
+    $sql_create_table = "CREATE TABLE IF NOT EXISTS ".$table_prefix."coastalynk_port_congestion (
         id INT(11)  PRIMARY KEY,
         updated_at datetime NULL,
         port VARCHAR(100) NULL,
@@ -46,7 +44,7 @@ function wpdocs_show_vessels_congestion(  ) {
         echo "Error creating table: " . $mysqli->error . "<br>";
     }
     
-    if ($mysqli->query("Delete from ".$table_prefix."port_congestion where DATE(updated_at) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
+    if ($mysqli->query("Delete from ".$table_prefix."coastalynk_port_congestion where DATE(updated_at) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
@@ -57,7 +55,7 @@ function wpdocs_show_vessels_congestion(  ) {
 
         $url = sprintf(
             "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%d",
-            urlencode('15df4420-d28b-4b26-9f01-13cca621d55e'),
+            urlencode($api_key),
             $lat,
             $lon,
             10
@@ -112,12 +110,12 @@ function wpdocs_show_vessels_congestion(  ) {
             
             foreach( $port_congestion as $key=>$item ) {
                 foreach( $item as $subkey=>$subitem ) {
-                    $mysqli->query("Insert into ".$table_prefix."port_congestion( id, `updated_at`, `port`, `vessel_type`, `vessel_status`, `total` ) Values( '".$primary_key."', now(), '".$name."', '".$key."', '".$subkey."', '".$subitem."' )");
+                    $mysqli->query("Insert into ".$table_prefix."coastalynk_port_congestion( id, `updated_at`, `port`, `vessel_type`, `vessel_status`, `total` ) Values( '".$primary_key."', now(), '".$name."', '".$key."', '".$subkey."', '".$subitem."' )");
                     $primary_key++;
                 }
             }
         }
-         print_r($port_congestion);
+    
     }    
     
     $mysqli->close();
@@ -125,9 +123,13 @@ function wpdocs_show_vessels_congestion(  ) {
 }
 
 function get_vessal_data( $uuid ) {
+    
+    global $mysqli;
+    
+    $api_key                        = get_option_data('coatalynk_datalastic_apikey');
     $url = sprintf(
         "https://api.datalastic.com/api/v0/vessel_pro?api-key=%s&uuid=%s",
-        urlencode('15df4420-d28b-4b26-9f01-13cca621d55e'),
+        urlencode($api_key),
         $uuid
     );
 
