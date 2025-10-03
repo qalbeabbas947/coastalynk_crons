@@ -84,7 +84,7 @@ function get_datalastic_field( $uuid, $field = 'navigation_status' ) {
 $table_name = $table_prefix . 'coastalynk_ports';
 $sql = "select * from ".$table_name." where country_iso='NG' and port_type='Port' order by title";
 $candidates = [];
-if ($result = $mysqli -> query($sql)) {
+if ($result = $mysqli->query($sql)) {
     
     $table_name_sts = $table_prefix . 'coastalynk_sts';
 
@@ -125,11 +125,7 @@ if ($result = $mysqli -> query($sql)) {
         last_updated TIMESTAMP,
         PRIMARY KEY (id)
     )";
-    if ($mysqli->query($sql) !== TRUE) {
-        echo "Error: " . $sql . "<br>" . $mysqli->error;
-    }
-
-    if ($mysqli->query("Delete from ".$table_name_sts." where DATE(last_updated) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
+    if ( $mysqli->query($sql) !== TRUE ) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
@@ -142,7 +138,7 @@ if ($result = $mysqli -> query($sql)) {
             
             $url = sprintf(
                 "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%d&type=%s",
-                urlencode($api_key),
+                urlencode( $api_key ),
                 $obj->lat,
                 $obj->lon,
                 10,
@@ -152,9 +148,8 @@ if ($result = $mysqli -> query($sql)) {
             $proximity_threshold = 500; // meters
 
             // Fetch vessels in area
-            $response = file_get_contents($url);
-            $data = json_decode($response, true);
-            echo '<pre>';print_r($data);echo '</pre>';
+            $response = file_get_contents( $url );
+            $data = json_decode( $response, true );
             if( intval( $data['data']['total'] ) > 0 ) {
                 $vessels = $data['data']['vessels'];
 
@@ -163,7 +158,7 @@ if ($result = $mysqli -> query($sql)) {
                     foreach ($vessels as $v2) {
                         
                         if ($v1['uuid'] != $v2['uuid']) { 
-                            $dist = haversineDistance($v1['lat'], $v1['lon'], $v2['lat'], $v2['lon']);
+                            $dist = haversineDistance( $v1['lat'], $v1['lon'], $v2['lat'], $v2['lon'] );
                             if ($dist < $proximity_threshold) {
                                 $time_diff = abs(strtotime($v1['last_position_UTC']) - strtotime($v2['last_position_UTC']));
                                 if ($time_diff < 600 && $v1['speed'] < 2 && $v2['speed'] < 2) {
@@ -318,7 +313,7 @@ if ($result = $mysqli -> query($sql)) {
                                     } else {
                                         $row = mysqli_fetch_assoc($result2);
                                         $array_ids[] = $row['id'];
-                                        $array_uidds[] = $row['vessel1_uuid'];
+                                        $array_uidds[] = $row[ 'vessel1_uuid' ];
                                     }
 
                                     $result2->free();
