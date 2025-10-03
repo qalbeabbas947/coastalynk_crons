@@ -1,5 +1,7 @@
 <?php
 set_time_limit(0);
+
+
 // ini_set( "display_errors", "On" );
 // error_reporting(E_ALL);
 
@@ -20,7 +22,21 @@ $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 if ($mysqli->connect_error) {
     die("Connection failed: " . $mysqli->connect_error);
 }
+$table_name = $table_prefix . 'coastalynk_vessels';
+$sql = "select imo, mmsi, name from ".$table_name." order by rand()";
+$result = $mysqli->query( $sql );
+while ( $obj = $result->fetch_object() ) {
+    $url = "https://api.datalastic.com/api/v0/vessel_history?api-key=15df4420-d28b-4b26-9f01-13cca621d55e&imo=".$obj->mmsi."&from=2021-11-01&to=2021-12-01";
+    $response = file_get_contents($url);
+    $data = json_decode($response, true);
+    $positions = $data['data']['positions'];
+    if( is_array( $positions ) && count( $positions ) > 0 ) {
+        echo '<br><br>imo:'.$obj->imo.'  mmsi:'.$obj->mmsi.'  name:'.$obj->name;
+    }
+    sleep(1);
+}
 
+exit;
 $table_name = $table_prefix . 'coastalynk_ports';
 $sql = "select * from ".$table_name." where port_type='Port' order by title";
 $idx = 0;

@@ -9,14 +9,6 @@ wpdocs_show_vessels_congestion( ) ;
 function wpdocs_show_vessels_congestion(  ) {
 
     global $mysqli;
-    $ports = [
-        'Apapa' => [6.45, 3.36],
-        'TinCanIsland' => [6.44, 3.34],
-        'Onne' => [4.71, 7.15],
-        'Calabar' => [4.95, 8.32],
-        'Lomé' => [6.1375, 1.2870],
-        'Tema' => [5.6167, 0.0167],
-    ];
 
     $table_prefix = 'staging_';
     // Connect to database directly
@@ -30,94 +22,124 @@ function wpdocs_show_vessels_congestion(  ) {
     }
 
     $sql_create_table = "CREATE TABLE IF NOT EXISTS ".$table_prefix."coastalynk_port_congestion (
-        id INT(11)  PRIMARY KEY,
-        updated_at datetime NULL,
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        port_id VARCHAR(50) NULL,
         port VARCHAR(100) NULL,
-        vessel_type VARCHAR(50) NULL,
-        vessel_status VARCHAR(50) NULL,
-        total INT(11) Default '0'
+        updated_at datetime Not Null,
+        PRIMARY KEY (id)
     )";
-
     if ($mysqli->query($sql_create_table) === TRUE) {
         echo "Table created successfully or already exists.<br>";
     } else {
         echo "Error creating table: " . $mysqli->error . "<br>";
     }
     
-    if ($mysqli->query("Delete from ".$table_prefix."coastalynk_port_congestion where DATE(updated_at) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
-        echo "Error: " . $sql . "<br>" . $mysqli->error;
+    $sql_create_table = "CREATE TABLE IF NOT EXISTS ".$table_prefix."coastalynk_port_congestion_vessels (
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        uuid VARCHAR(50) NULL,
+        name VARCHAR(50) NULL,
+        mmsi VARCHAR(100) NULL,
+        eni VARCHAR(50) NULL,
+        imo VARCHAR(50) NULL,
+        type VARCHAR(50) NULL,
+        type_specific VARCHAR(50) NULL,
+        country_iso VARCHAR(50) NULL,
+        congestion_id INT(11) NOT NULL,
+        navigation_status VARCHAR(50) NULL,
+        lat INT(11) Default '0',
+        lon INT(11) Default '0',
+        speed INT(3) Default '0',
+        course INT(3) Default '0',
+        heading INT(3) Default '0',
+        current_draught Float Default '0',
+        dest_port_uuid VARCHAR(50) NULL,
+        dest_port VARCHAR(50) NULL,
+        dest_port_unlocode VARCHAR(50) NULL,
+        dep_port VARCHAR(50) NULL,
+        dep_port_uuid VARCHAR(50) NULL,
+        dep_port_unlocode VARCHAR(50) NULL,
+        last_position_epoch VARCHAR(50) NULL,
+        last_position_UTC VARCHAR(50) NULL,
+        atd_epoch VARCHAR(50) NULL,
+        atd_UTC VARCHAR(50) NULL,
+        eta_epoch VARCHAR(50) NULL,
+        eta_UTC VARCHAR(50) NULL,
+        destination VARCHAR(50) NULL,
+        PRIMARY KEY (id)
+    )";
+
+    if ($mysqli->query($sql_create_table) === TRUE) {
+
+        $index_query = "CREATE INDEX IF NOT EXISTS coastalynk_port_congestion_vessels_index ON ".$table_prefix."coastalynk_port_congestion_vessels (congestion_id)";
+        $mysqli->query($index_query);
+
+        echo "Table created successfully or already exists.<br>";
+    } else {
+        echo "Error creating table: " . $mysqli->error . "<br>";
     }
 
-    $primary_key = 1;
-    foreach( $ports as $name => $portdata ) {
-        $lat = $portdata[0];
-        $lon = $portdata[1];
+    $table_name = $table_prefix . 'coastalynk_ports';
+    $sql = "select port_id, title, lat, lon,port_type from ".$table_name." where country_iso='NG' and port_type='Port'";
+    $result = $mysqli->query($sql);
+    $num_rows = mysqli_num_rows($result);
+    if( $num_rows > 0 ) {
+        $now = date('Y-m-d H:i:s');
+        while ($row = mysqli_fetch_assoc($result)) {
+        echo "<br>ID: " . $row['port_id'] . ", Name: " . $row['title'] . "<br>";
 
-        $url = sprintf(
-            "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%d",
-            urlencode($api_key),
-            $lat,
-            $lon,
-            10
-        );
+            $name = $row['title'];
+            $port_id = $row['port_id'];
+            $lat = $row['lat'];
+            $lon = $row['lon'];
 
-        // Make the API request
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Enable in production
+            $url = sprintf(
+                "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%d",
+                urlencode($api_key),
+                $lat,
+                $lon,
+                10
+            );
 
-        $response = curl_exec($ch);
+            // Make the API request
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Enable in production
 
-        if (curl_errno($ch)) {
-            echo "cURL Error for: " . curl_error($ch) . "\n";
+            $response = curl_exec($ch);
+
+            if (curl_errno($ch)) {
+                echo "cURL Error for: " . curl_error($ch) . "\n";
+                curl_close($ch);
+            }
             curl_close($ch);
-        }
-        curl_close($ch);
-        
-        // Decode the JSON response
-        $data = json_decode($response, true);
-        $port_congestion = [];
-        // Check if we got data
-        if (isset($data['data']['vessels'])) {
-            $vessels = $data['data']['vessels'];
             
-            // Add each vessel's position to our master list and update the overall bounding box
-            foreach ($vessels as $vessel) {
-                if (isset($vessel['lat']) && isset($vessel['lon'])) {
+            // Decode the JSON response
+            $data = json_decode($response, true);
+            $port_congestion = [];
+            
+            // Check if we got data
+            if (isset($data['data']['vessels'])) {
+                $vessels = $data['data']['vessels'];
+                
+                // Add each vessel's position to our master list and update the overall bounding box
+                if( count( $vessels ) > 0 ) {
+                    
+                    $mysqli->query("Insert into ".$table_prefix."coastalynk_port_congestion( `updated_at`, port_id, `port` ) Values( '".$now."', '".$port_id."', '".$name."' )");
+                    $last_port_id = $mysqli->insert_id;
+                    foreach ($vessels as $vessel) {
 
-                    $speed = $vessel['speed'] ?? 99; // Get speed, default to high if missing
-        
-                    // Get the destination port name (crucial for confirmation)
-                    $destination = strtoupper($vessel['destination'] ?? '');
-
-                    $prodata = get_vessal_data( $vessel['uuid'] );
-                    if( ! isset( $port_congestion[$vessel['type']][$vessel['type_specific']] ) ) {
-                        $port_congestion[$vessel['type']] = [];
+                        if (isset($vessel['lat']) && isset($vessel['lon'])) {
+                            $prodata = get_vessal_data( $vessel['uuid'] );
+                            $prodata = $prodata['data'];
+                            $mysqli->query("Insert into ".$table_prefix."coastalynk_port_congestion_vessels( `congestion_id`, uuid, name, mmsi, eni, imo, type_specific, country_iso, type, `navigation_status`, `lat`, `lon`, `speed`, `course`, `destination`,dest_port_uuid, dest_port, dest_port_unlocode, dep_port, dep_port_uuid, dep_port_unlocode, last_position_epoch, last_position_UTC, atd_epoch, atd_UTC, eta_epoch, eta_UTC, heading, current_draught ) 
+                            Values( '".$last_port_id."', '".$vessel['uuid']."', '".$vessel['name']."', '".$vessel['mmsi']."', '".$vessel['eni']."', '".$vessel['imo']."', '".$vessel['type_specific']."', '".$vessel['country_iso']."', '".$vessel['type']."', '".$prodata['navigation_status']."', '".$vessel['lat']."' , '".$vessel['lon']."' , '".intval($vessel['speed'])."' , '".intval($vessel['course'])."', '".$vessel['destination']."', '".$prodata['dest_port_uuid']."', '".$prodata['dest_port']."', '".$prodata['dest_port_unlocode']."', '".$prodata['dep_port']."', '".$prodata['dep_port_uuid']."', '".$prodata['dep_port_unlocode']."', '".$prodata['last_position_epoch']."', '".$prodata['last_position_UTC']."', '".$prodata['atd_epoch']."', '".$prodata['atd_UTC']."', '".$prodata['eta_epoch']."', '".$prodata['eta_UTC']."', '".intval($prodata['heading'])."', '".floatval($prodata['current_draught'])."' )");
+                        }
                     }
-
-                    $prodata = $prodata['data'];
-                    if( ! isset( $port_congestion[$vessel['type']][$prodata['navigation_status']] ) ) {
-                        $port_congestion[$vessel['type']][$prodata['navigation_status']] = 0;
-                    }
-
-                    $port_congestion[$vessel['type']][$prodata['navigation_status']] += 1;
                 }
             }
-        }
-
-        if( !empty( $port_congestion )  ) {
-            
-            foreach( $port_congestion as $key=>$item ) {
-                foreach( $item as $subkey=>$subitem ) {
-                    $mysqli->query("Insert into ".$table_prefix."coastalynk_port_congestion( id, `updated_at`, `port`, `vessel_type`, `vessel_status`, `total` ) Values( '".$primary_key."', now(), '".$name."', '".$key."', '".$subkey."', '".$subitem."' )");
-                    $primary_key++;
-                }
-            }
-        }
-    
-    }    
-    
+        }    
+    }
     $mysqli->close();
    
 }
