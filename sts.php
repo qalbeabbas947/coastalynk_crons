@@ -9,7 +9,7 @@ require 'PHPMailer/src/PHPMailer.php';
 require 'PHPMailer/src/SMTP.php';
 require_once __DIR__ . '/common.php';
 global $table_prefix;
-
+coastalynk_summary_table();
 // Connect to database directly
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 
@@ -324,7 +324,7 @@ if ($result = $mysqli->query($sql)) {
                 }
             }
 
-            time_nanosleep(0, 50000000);
+            sleep(1);
         }
     }
 
@@ -337,4 +337,10 @@ if ($result = $mysqli->query($sql)) {
 }
 
 $result->free(); // Free the result set
+
+$sql = "SELECT id as total FROM $table_name_sts where last_updated = (select max(last_updated) from $table_name_sts)";
+$result = $mysqli->query($sql);
+$num_rows = mysqli_num_rows($result);
+coastalynk_update_summary('STS', $num_rows);
+
 $mysqli->close(); // Close the database connection

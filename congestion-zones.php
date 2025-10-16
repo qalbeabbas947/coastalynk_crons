@@ -84,25 +84,64 @@ function wpdocs_show_vessels_congestion(  ) {
     $result = $mysqli->query($sql);
     $num_rows = mysqli_num_rows($result);
     if( $num_rows > 0 ) {
-        $now = date('Y-m-d H:i:s');
-        while ($row = mysqli_fetch_assoc($result)) {
-        echo "<br>ID: " . $row['port_id'] . ", Name: " . $row['title'] . "<br>";
 
-            $name = $row['title'];
-            $port_id = $row['port_id'];
-            $capacity = $row['capacity'];
+        $nigerian_zones = [];
+        $nigerian_zones[] = ['Lagos Coastal Waters', 6.4, 3.4];
+        $nigerian_zones[] = ['Badagry Coastal Area', 6.3, 2.7];
+        $nigerian_zones[] = ['Escravos River Mouth', 5.5, 5.0];
+        $nigerian_zones[] = ['Forcados Terminal', 5.2, 5.4];
+        $nigerian_zones[] = ['Brass Oil Terminal', 4.3, 6.2];
+        $nigerian_zones[] = ['Brass Oil Terminal', 4.2, 5.9];
+        $nigerian_zones[] = ['Bonny LNG Terminal', 4.4, 7.1];
+        $nigerian_zones[] = ['Calabar Port Approach', 4.9, 8.3];
+
+        // ========== TERRITORIAL WATERS POINTS (12-24 NM) ==========
+        $nigerian_zones[] = ['Lagos Offshore Zone', 6.0, 3.0];
+        $nigerian_zones[] = ['Western Approaches', 5.7, 2.5];
+        $nigerian_zones[] = ['Central Offshore', 4.8, 4.8];
+        $nigerian_zones[] = ['Niger Delta Offshore', 4.5, 5.8];
+        $nigerian_zones[] = ['Eastern Approaches', 4.2, 7.5];
+        $nigerian_zones[] = ['Calabar Offshore', 4.5, 8.0];
+        $nigerian_zones[] = ['territorial water 1', 5.0, 3.4];
+        $nigerian_zones[] = ['territorial water 2', 5.9, 4.2];
+
+        // ========== EEZ POINTS (24-200 NM) ==========
+        $nigerian_zones[] = ['Western EEZ Deep', 5.0, 2.0];
+        $nigerian_zones[] = ['Bonga FPSO Area', 4.2, 3.8];
+        $nigerian_zones[] = ['Western EEZ Central', 4.0, 3.0];
+        $nigerian_zones[] = ['Western EEZ Central', 3.7, 5.5];
+        $nigerian_zones[] = ['Central EEZ North', 3.8, 4.6];
+        $nigerian_zones[] = ['Agbami FPSO Area', 3.5, 5.4];
+        $nigerian_zones[] = ['Akpo FPSO Area', 3.3, 6.2];
+        $nigerian_zones[] = ['Eastern EEZ Central', 3.2, 7.0];
+        $nigerian_zones[] = ['Eastern EEZ Deep', 3.0, 8.0];
+        $nigerian_zones[] = ['Calabar EEZ Offshore', 3.5, 8.5];
+        $nigerian_zones[] = ['Deepwater West', 3.0, 3.5];
+        $nigerian_zones[] = ['Deepwater Central', 2.5, 5.5];
+        $nigerian_zones[] = ['Deepwater East', 2.2, 7.5,];
+        
+
+        $now = date('Y-m-d H:i:s');
+        //while ($row = mysqli_fetch_assoc($result)) {
+        echo '<pre>';
+        foreach($nigerian_zones as $row ) {
+        //echo "<br>ID: " . $row['port_id'] . ", Name: " . $row['title'] . "<br>";
+
+            // $name = $row['title'];
+            // $port_id = $row['port_id'];
+            $capacity = 5;// $row['capacity'];
             if( intval( $capacity ) <= 0 ) {
                 $capacity = 5;
             }
-            $lat = $row['lat'];
-            $lon = $row['lon'];
+            $lat = $row[1];//$row['lat'];
+            $lon =  $row[2];// $row['lon'];
 
-            $url = sprintf(
+            echo $url = sprintf(
                 "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%d",
                 urlencode($api_key),
                 $lat,
                 $lon,
-                10
+                50
             );
 
             // Make the API request
@@ -122,7 +161,11 @@ function wpdocs_show_vessels_congestion(  ) {
             // Decode the JSON response
             $data = json_decode($response, true);
             $port_congestion = [];
-            
+            print_r($data['data']['vessels']);
+        }
+        
+            exit;
+        { 
             // Check if we got data
             if (isset($data['data']['vessels'])) {
                 $vessels = $data['data']['vessels'];

@@ -9,7 +9,7 @@ require 'PHPMailer/src/PHPMailer.php';
 require 'PHPMailer/src/SMTP.php';
 require_once __DIR__ . '/common.php';
 global $table_prefix;
-
+coastalynk_summary_table();
 // Connect to database directly
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 
@@ -210,10 +210,6 @@ if ($result = $mysqli -> query($sql)) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
     }
 
-    if ($mysqli->query("Delete from ".$table_name_sbm." where DATE(last_updated) < '".date('Y-m-d', strtotime( '-1 Month' ))."';") !== TRUE) {
-        echo "Error: " . $sql . "<br>" . $mysqli->error;
-    }
-
     $types = ['Tanker', 'Tanker - Hazard A (Major)', 'Tanker - Hazard B', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard D (Recognizable)', 'Tanker: Hazardous category A', 'Tanker: Hazardous category B', 'Tanker: Hazardous category C', 'Tanker: Hazardous category D'];
     $array_ids = [];
     $array_uidds = [];
@@ -232,6 +228,7 @@ if ($result = $mysqli -> query($sql)) {
             // Fetch vessels in area
             $response = file_get_contents($url);
             $data = json_decode($response, true);
+            
             $vessels = $data['data']['vessels'];
 
             // Check proximity
@@ -356,6 +353,7 @@ if ($result = $mysqli -> query($sql)) {
                     $checkresult->free(); // Free the result set
                 }
             }
+            sleep(1);
         }
     }
 
@@ -530,4 +528,9 @@ if ($result = $mysqli -> query($sql)) {
 }
 
 $result->free(); // Free the result set
+$sql = "SELECT id as total FROM $table_name_sbm  where last_updated = (select max(last_updated) from $table_name_sbm)";
+$result = $mysqli->query($sql);
+$num_rows = mysqli_num_rows($result);
+coastalynk_update_summary('SBM', $num_rows);
+
 $mysqli->close(); // Close the database connection

@@ -4,6 +4,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/common.php';
 global $table_prefix;
+coastalynk_summary_table();
 // Connect to database directly
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 
@@ -22,6 +23,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name (
     country_iso VARCHAR(255),
     lat VARCHAR(255),
     lon VARCHAR(255),
+    capacity int(4)  Not Null Default 50,
     port_type VARCHAR(255)
 )";
 if ($mysqli->query($sql) !== TRUE) {
@@ -48,3 +50,9 @@ foreach( $countries as $country ) {
         }
     }
 }
+
+
+$sql =  "SELECT port_id FROM $table_name";
+$result = $mysqli->query($sql);
+$num_rows = mysqli_num_rows($result);
+coastalynk_update_summary('Ports', $num_rows);
