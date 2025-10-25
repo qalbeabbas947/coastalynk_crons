@@ -55,7 +55,9 @@ $coastalynk_sbm_complete_email_default  = "Dear Sir/Madam,
 <br>
 <p>This is an automatic notification from Coastalynk Maritime Intelligence regarding a Single Buoy Mooring (sbm) operation detected at [port] is complete.</p><br>
 <h3>General Detail:</h3>
-<p>Date/Time (UTC): [last_updated]</p>
+<p>Last Updated Date/Time (UTC): [last_updated]</p>
+<p>Start Date/Time (UTC): [start_date]</p>
+<p>End Date/Time (UTC): [end_date]</p>
 <p>Location: ([lat], [lon]) (Lagos Offshore)</p>
 <p>Distance Between Vessels: [distance]</p>
 <p>Port Reference: [port]</p>
@@ -88,6 +90,8 @@ $coastalynk_sbm_no_opt_body_default  = "Dear Sir/Madam,
                                             <p>This is an automatic notification from Coastalynk Maritime Intelligence regarding a Single Buoy Mooring (sbm) operation detected but not performed at [port].</p><br>
                                             <h3>General Detail:</h3>
                                             <p>Date/Time (UTC): [last_updated]</p>
+                                            <p>Start Date/Time (UTC): [start_date]</p>
+                                            <p>End Date/Time (UTC): [end_date]</p>
                                             <p>Location: ([lat], [lon]) (Lagos Offshore)</p>
                                             <p>Distance Between Vessels: [distance]</p>
                                             <p>Port Reference: [port]</p>
@@ -149,7 +153,7 @@ function haversineDistance($lat1, $lon1, $lat2, $lon2, $unit = 'meters') {
     }
 }
 
-function get_datalastic_field( $uuid, $field = 'navigation_status' ) {
+function get_datalastic_field( $uuid, $field = 'navigation_status', $is_full = true ) {
     
     global $api_key;
     $url = 'https://api.datalastic.com/api/v0/vessel_pro?api-key='.urlencode($api_key).'&uuid='.$uuid;
@@ -160,8 +164,12 @@ function get_datalastic_field( $uuid, $field = 'navigation_status' ) {
     $output = curl_exec($ch);
     curl_close($ch);
     $data = json_decode($output, true);
-
-    return $data['data'][$field];
+    if( $is_full ) {
+        return $data['data'];
+    } else {
+        return $data['data'][$field];
+    }
+    
 }
 
 $port_type = 'Offshore Terminal';
@@ -181,6 +189,7 @@ if ($result = $mysqli -> query($sql)) {
     // Create table if not exists
     $sql = "CREATE TABLE IF NOT EXISTS $table_name_sbm (
         id INT AUTO_INCREMENT,
+        
         uuid VARCHAR(50) default '',
         name VARCHAR(255) default '',
         mmsi VARCHAR(50) default '',
@@ -199,12 +208,34 @@ if ($result = $mysqli -> query($sql)) {
         port_id VARCHAR(50) default '',
         port_type VARCHAR(50) default '',
         distance float default 0,
+        event_ref_id VARCHAR(30) default '',
+        zone_terminal_name VARCHAR(30) default '',
+        start_date TIMESTAMP default '',
+        end_date TIMESTAMP default '',
+        remarks VARCHAR(255) default '',
+        condition VARCHAR(15) default '',
+        event_percentage float default 0,
+        cargo_eta float default 0,
+        vessel_owner VARCHAR(255) default '',
+        cargo_category_type  VARCHAR(255) default '',
         is_offloaded ENUM('No','Yes') NOT NULL DEFAULT 'No',
         is_start_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
         is_complete_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
         last_updated TIMESTAMP,
         PRIMARY KEY (id)
     )";
+
+
+Zone/Terminal name + centroid coordinates.
+Vessel(s) name, IMO, MMSI, Flag, Type, Type_Specific, Owner/Manager.
+Draught Before / After (+ Diff).
+Cargo Category and Grade (Crude, PMS, AGO, LPG etc.).
+Origin / Destination port, ETA.
+Operation Mode (Loading/Discharge/STS).
+Status (Ongoing/Completed/Historical).
+Reference ID and optional Audit Trail link.
+
+
 
     if ($mysqli->query($sql) !== TRUE) {
         echo "Error: " . $sql . "<br>" . $mysqli->error;
@@ -234,7 +265,7 @@ if ($result = $mysqli -> query($sql)) {
             // Check proximity
             if( is_array( $vessels ) && count( $vessels ) > 0 ) {
                 foreach ($vessels as $v1) {
-                    $sql = "select id, uuid, is_start_email_sent from ".$table_name_sbm." where port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' and is_offloaded='No' and uuid='".$mysqli->real_escape_string($v1['uuid'])."'";
+                    echo $sql = "select id, uuid, is_start_email_sent from ".$table_name_sbm." where port_type='".$mysqli->real_escape_string($_REQUEST['port_type'])."' and is_offloaded='No' and uuid='".$mysqli->real_escape_string($v1['uuid'])."'";
                     $checkresult = $mysqli->query($sql);
                     $num_rows = mysqli_num_rows($checkresult);
                     
@@ -243,7 +274,7 @@ if ($result = $mysqli -> query($sql)) {
                             $navigation_status = get_datalastic_field($v1['uuid']);
                             $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
                             $dist = haversineDistance($v1['lat'], $v1['lon'], $obj->lat, $obj->lon);
-                            $sql = "INSERT INTO $table_name_sbm (uuid , name, mmsi, imo, country_iso, type, type_specific, lat, lon,speed,navigation_status, draught, last_position_UTC, distance, port, port_id, port_type, last_updated)
+                            $sql = "INSERT INTO $table_name_sbm (uuid , name, mmsi, imo, country_iso, type, type_specific, lat, lon,speed,navigation_status, draught, last_position_UTC, distance, port, port_id, port_type, last_updated,start_date)
                             VALUES (
                                     '" . $mysqli->real_escape_string($v1['uuid']) . "',
                                     '" . $mysqli->real_escape_string($v1['name']) . "',
@@ -262,7 +293,7 @@ if ($result = $mysqli -> query($sql)) {
                                     '" . $mysqli->real_escape_string($obj->title) . "',
                                     '" . $mysqli->real_escape_string($obj->port_id) . "',
                                     '" . $mysqli->real_escape_string($obj->port_type) . "',
-                                        NOW())";
+                                        NOW(), NOW())";
                             if ($mysqli->query($sql) !== TRUE) {
                                 echo "Error: " . $sql . "<br>" . $mysqli->error;
                             } else {
@@ -398,6 +429,8 @@ if ($result = $mysqli -> query($sql)) {
                 $coastalynk_sbm_no_opt_body = str_replace( "[port]", $v1['port'], $coastalynk_sbm_no_opt_body );
                 $coastalynk_sbm_no_opt_body = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_no_opt_body );
                 $coastalynk_sbm_no_opt_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_no_opt_body ); 
+                $coastalynk_sbm_no_opt_body = str_replace( "[start_date]", date('Y-m-d H:i:s', strtotime($v1['start_date'])), $coastalynk_sbm_no_opt_body ); 
+                $coastalynk_sbm_no_opt_body = str_replace( "[end_date]", date('Y-m-d H:i:s', strtotime($v1['end_date'])), $coastalynk_sbm_no_opt_body ); 
                 $body = $coastalynk_sbm_no_opt_body;
 
                 $coastalynk_sbm_no_opt_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_no_opt_email_subject_original );
@@ -417,6 +450,8 @@ if ($result = $mysqli -> query($sql)) {
                 $coastalynk_sbm_no_opt_email_subject = str_replace( "[port]", $v1['port'], $coastalynk_sbm_no_opt_email_subject );
                 $coastalynk_sbm_no_opt_email_subject = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_no_opt_email_subject );
                 $coastalynk_sbm_no_opt_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_no_opt_email_subject ); 
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[start_date]", date('Y-m-d H:i:s', strtotime($v1['start_date'])), $coastalynk_sbm_no_opt_email_subject ); 
+                $coastalynk_sbm_no_opt_email_subject = str_replace( "[end_date]", date('Y-m-d H:i:s', strtotime($v1['end_date'])), $coastalynk_sbm_no_opt_email_subject ); 
                 $subject = $coastalynk_sbm_no_opt_email_subject;
             } else {
 
@@ -439,7 +474,8 @@ if ($result = $mysqli -> query($sql)) {
                 $coastalynk_sbm_complete_body = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_body );
                 $coastalynk_sbm_complete_body = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_body );
                 $coastalynk_sbm_complete_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_body ); 
-                
+                $coastalynk_sbm_complete_body = str_replace( "[start_date]", date('Y-m-d H:i:s', strtotime($v1['start_date'])), $coastalynk_sbm_complete_body ); 
+                $coastalynk_sbm_complete_body = str_replace( "[end_date]", date('Y-m-d H:i:s', strtotime($v1['end_date'])), $coastalynk_sbm_complete_body ); 
 
                 $coastalynk_sbm_complete_email_subject = str_replace( "[name]", $v1['name'], $coastalynk_sbm_complete_email_subject_original );
                 $coastalynk_sbm_complete_email_subject = str_replace( "[mmsi]", $v1['mmsi'], $coastalynk_sbm_complete_email_subject );
@@ -458,6 +494,8 @@ if ($result = $mysqli -> query($sql)) {
                 $coastalynk_sbm_complete_email_subject = str_replace( "[distance]", $v1['distance'], $coastalynk_sbm_complete_email_subject );
                 $coastalynk_sbm_complete_email_subject = str_replace( "[port]", $v1['port'], $coastalynk_sbm_complete_email_subject );
                 $coastalynk_sbm_complete_email_subject = str_replace( "[port_id]", $v1['port_id'], $coastalynk_sbm_complete_email_subject );
+                $coastalynk_sbm_complete_email_subject = str_replace( "[start_date]", date('Y-m-d H:i:s', strtotime($v1['start_date'])), $coastalynk_sbm_complete_email_subject ); 
+                $coastalynk_sbm_complete_email_subject = str_replace( "[end_date]", date('Y-m-d H:i:s', strtotime($v1['end_date'])), $coastalynk_sbm_complete_email_subject );
                 $coastalynk_sbm_complete_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sbm_complete_email_subject ); 
                 $subject = $coastalynk_sbm_complete_email_subject;
 
@@ -514,7 +552,7 @@ if ($result = $mysqli -> query($sql)) {
 
                 $mail->send();
 
-                $sql = "update ".$table_name_sbm." set is_complete_email_sent='Yes' where id='".$v1['id']."'";
+                $sql = "update ".$table_name_sbm." set is_complete_email_sent='Yes', end_date=NOW() where id='".$v1['id']."'";
                 $mysqli->query($sql);
                 echo 'Email sent successfully!';
             } catch (Exception $e) {

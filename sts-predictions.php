@@ -1,6 +1,6 @@
 <?php
 
-ini_set("display_errors", "On");
+ini_set( "display_errors", "On" );
 error_reporting(E_ALL);
 
 class STSTransferDetector {
@@ -149,19 +149,36 @@ class STSTransferDetector {
     /**
      * Get zone/terminal name based on position
      */
-    private function getZoneTerminalName($lat, $lon) {
-        // This would typically call a geocoding service or use a port database
-        // For now, we'll return a simulated value based on common STS areas
+    public function getZoneTerminalName($lat, $lon) {
         
-        $commonZones = [
-            'Singapore STS Zone',
-            'Fujairah Anchorage',
-            'Gibraltar STS Area',
-            'Rotterdam STS Zone',
-            'Balboa Anchorage'
+        $endpoint = $this->baseUrl . '/port_find';
+        $params = [
+            'api-key' => $this->apiKey,
+            'lat' => $lat,
+            'lon' => $lon,
+            'radius' => 10
         ];
         
-        return $commonZones[array_rand($commonZones)];
+        $url = $endpoint . '?' . http_build_query($params);
+        
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        $data = json_decode($response, true);
+        
+        if( isset( $data['data'] ) && is_array( $data['data'] ) && count( $data['data'] ) > 0 ) {
+            return $data['data'][0]['port_name'];
+        }
+        
+        return '';
     }
     
     /**
@@ -240,18 +257,16 @@ class STSTransferDetector {
     /**
      * Detect STS transfers between two vessels
      */
-    public function detectSTSTransfer($mmsi1, $mmsi2) {
+    public function detectSTSTransfer($vessel1, $vessel2) {
         try {
-            $vessel1 = $this->getVesselInfo($mmsi1);
-            $vessel2 = $this->getVesselInfo($mmsi2);
             
             if (!$vessel1 || !$vessel2) {
                 throw new Exception("Could not retrieve vessel information");
             }
             
             // Get historical data (last 6 hours)
-            $history1 = $this->getVesselHistory($mmsi1, 24);
-            $history2 = $this->getVesselHistory($mmsi2, 24);
+            $history1 = $this->getVesselHistory($vessel1['mmsi'], 24);
+            $history2 = $this->getVesselHistory($vessel2['mmsi'], 24);
 
             // Analyze proximity and movement patterns
             $analysis = $this->analyzeVesselBehavior($history1, $history2, $vessel1, $vessel2);
@@ -300,9 +315,9 @@ class STSTransferDetector {
         $closeProximityCount = 0;
         $stationaryCount = 0;
         $totalComparisons = 0;
-
-        foreach ($history1 as $point1) {
-            foreach ($history2 as $point2) {
+        
+        foreach ($history1['positions'] as $point1) {
+            foreach ($history2['positions'] as $point2) {
                 // Compare points within 10 minutes of each other
                 if (is_array($point1) && is_array($point2)) {
                     $timeDiff = abs(strtotime($point1['last_position_epoch'] ?? 0) - strtotime($point2['last_position_epoch'] ?? 0));
@@ -497,13 +512,13 @@ class STSTransferDetector {
     }
 }
 
-// Usage
-$apiKey = '15df4420-d28b-4b26-9f01-13cca621d55e';
-$detector = new STSTransferDetector($apiKey);
+// // Usage
+// $apiKey = '15df4420-d28b-4b26-9f01-13cca621d55e';
+// $detector = new STSTransferDetector($apiKey);   
 
-// Check for STS transfer between two vessels
-$result = $detector->detectSTSTransfer('123456789', '987654321');
+// // Check for STS transfer between two vessels
+// $result = $detector->detectSTSTransfer('123456789', '987654321');
 
-echo "<pre>";
-print_r($result);
-echo "</pre>";
+// echo "<pre>";
+// print_r($result);
+// echo "</pre>";
