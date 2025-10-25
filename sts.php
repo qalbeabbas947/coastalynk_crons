@@ -100,7 +100,7 @@ if ($result = $mysqli->query($sql)) {
                 $obj->lat,
                 $obj->lon
             );
-        if( $_REQUEST['lat'] == $obj->lat && $_REQUEST['lon'] == $obj->lon ) {
+        if( number_format($_REQUEST['lat'], 2) == number_format( $obj->lat, 2) && number_format( $_REQUEST['lon'], 2) == number_format( $obj->lon, 2) ) {
             $port_id = $obj->port_id;
             $port_name = $obj->title;
         }
