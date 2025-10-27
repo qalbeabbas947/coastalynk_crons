@@ -249,7 +249,7 @@ class STSTransferDetector {
         $stationaryHours = $analysis['stationary_hours'];
         
         if ($stationaryHours >= 6) return 'Completed';
-        if ($stationaryHours >= 2) return 'Ongoing';
+        if ($stationaryHours >= 3) return 'Ongoing';
         
         return 'Ongoing';
     }

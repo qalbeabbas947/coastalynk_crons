@@ -216,7 +216,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             if( $num_rows == 0 ) {
                                 $vehicel_1 = get_datalastic_field( $v1['uuid'], '', true );
                                 $vehicel_2 = get_datalastic_field( $v2['uuid'], '', true );
-                                
+                                $dist = haversineDistance( $v1['lat'], $v1['lon'], $v2['lat'], $v2['lon'] );
                                 $v1_navigation_status = $vehicel_1[ 'navigation_status' ];
                                 $v2_navigation_status = $vehicel_2[ 'navigation_status' ];
 
@@ -257,7 +257,10 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 $vessel_owner2 = $detectresult['vessel_2']['vessel_owner']; 
                                 $zone_terminal_name = $detectresult['zone_terminal_name']; 
                                 $operation_mode = $detectresult['operation_mode']; 
-                                
+                                $status = $detectresult['status']; 
+                                if( empty( $status ) ) {
+                                    $status = 'Detected';
+                                }
                                 $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id, vessel1_eta, vessel1_atd, vessel2_eta, vessel2_atd,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,cargo_eta1, vessel_owner1,vessel_condition2,cargo_eta2, vessel_owner2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed)
                                         VALUES (
                                             '" . $mysqli->real_escape_string($v1['uuid']) . "',
@@ -287,8 +290,8 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             '" . $v2_current_draught . "',
                                             '" . date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) . "',
                                             '" . floatval($dist) . "',
-                                            '" . $mysqli->real_escape_string($port_id) . "',
-                                            '" . $mysqli->real_escape_string($port_name) . "',
+                                            '" . $mysqli->real_escape_string( $port_name ) . "',
+                                            '" . $mysqli->real_escape_string( $port_id ) . "',
                                             '".$last_updated."', NOW(), '".$ref_id."',
                                             '".$v1_current_eta."', 
                                             '".$v1_current_atd."', 
@@ -318,7 +321,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 } else {
 
                                     $insert_id = $array_ids[] = $mysqli->insert_id;
-                                    $array_uidds[] = [ $v1['vessel1_uuid'], $v2['vessel2_uuid'] ];
+                                    $array_uidds[] = [ $v1['uuid'], $v2['uuid'] ];
 
                                     $coastalynk_sts_body = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_body_original );
                                     $coastalynk_sts_body = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_body );
