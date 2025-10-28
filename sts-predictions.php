@@ -300,17 +300,11 @@ class STSTransferDetector {
             return $analysis;
         }
         
-        // Calculate current distance
-        $pos1 = $vessel1['position'] ?? null;
-        $pos2 = $vessel2['position'] ?? null;
-        
-        if ($pos1 && $pos2) {
-            $analysis['current_distance_nm'] = $this->calculateDistanceNM(
-                $pos1['lat'], $pos1['lon'],
-                $pos2['lat'], $pos2['lon']
+        $analysis['current_distance_nm'] = $this->calculateDistanceNM(
+                $vessel1['lat'], $vessel1['lon'],
+                $vessel2['lat'], $vessel2['lon']
             );
-        }
-        
+       
         // Analyze historical proximity and movement
         $closeProximityCount = 0;
         $stationaryCount = 0;
