@@ -251,7 +251,7 @@ class STSTransferDetector {
         if ($stationaryHours >= 6) return 'Completed';
         if ($stationaryHours >= 3) return 'Ongoing';
         
-        return 'Ongoing';
+        return 'Detected';
     }
 
     /**

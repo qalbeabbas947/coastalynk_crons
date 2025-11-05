@@ -86,17 +86,20 @@ function get_datalastic_field( $uuid, $field = 'navigation_status', $is_full = t
         return $data['data'][$field];
     }
 }
+
+
 $detector = new STSTransferDetector( $api_key );
 $table_name = $table_prefix . 'coastalynk_ports';
-$sql = "select * from ".$table_name." where country_iso='NG' and port_type='Port' order by title";
+$sql = "select *, ST_AsText(port_area) as port_area from ".$table_name." where country_iso='NG' and port_type='Port' order by title";
 $candidates = [];
 $last_updated = date('Y-m-d H:i:s');
 $port_id = '';
 $port_name = '';
+$polygon = null;
 $ports = [];
 if ($result = $mysqli->query($sql)) {
     while ( $obj = $result->fetch_object() ) { 
-        $url = sprintf(
+        echo $url = sprintf(
                 "https://coastalynk.com/coastalynk_crons/sts.php?lat=%f&lon=%f",
                 $obj->lat,
                 $obj->lon
@@ -104,11 +107,25 @@ if ($result = $mysqli->query($sql)) {
         if( number_format($_REQUEST['lat'], 2) == number_format( $obj->lat, 2) && number_format( $_REQUEST['lon'], 2) == number_format( $obj->lon, 2) ) {
             $port_id = $obj->port_id;
             $port_name = $obj->title;
+            $polygon = $obj->port_area;
+            
         }
 
         $ports[] = $obj->title;
     }
-}    
+} 
+
+// isPointInPolygon(3.30000000, 6.25000000, wktToArray($polygon)) or die('outside1');
+// echo 'inside1';
+// // isPointInPolygon(3.20000000, 6.30000000, wktToArray($polygon)) or die('outside2');
+// // echo 'inside2';
+// isPointInPolygon(3.35000000, 6.30000000, wktToArray($polygon)) or die('outside3');
+// echo 'inside3';
+// isPointInPolygon(3.26611111, 6.31666667, wktToArray($polygon)) or die('outside4');
+// echo 'inside4';
+// isPointInPolygon(3.30000000, 6.20000000, wktToArray($polygon)) or die('outside5');
+// echo 'inside5';
+// exit;
 if( empty( $port_name ) ) {
     $url = sprintf(
         "https://api.datalastic.com/api/v0/port_find?api-key=%s&lat=%f&lon=%f&radius=%d",
@@ -155,6 +172,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     vessel1_draught float default 0,
     vessel1_completed_draught float default 0,
     vessel1_last_position_UTC TIMESTAMP,
+    vessel1_signal ENUM('', 'Gap','Consistent') NOT NULL DEFAULT '',
     vessel2_uuid VARCHAR(50) default '',
     vessel2_name VARCHAR(255) default '',
     vessel2_mmsi VARCHAR(50) default '',
@@ -169,6 +187,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     vessel2_draught float default 0,
     vessel2_completed_draught float default 0,
     vessel2_last_position_UTC TIMESTAMP,
+    vessel2_signal ENUM('', 'AIS Gap','AIS Consistent') NOT NULL DEFAULT '',
     port VARCHAR(255) default '',
     port_id VARCHAR(50) default '',
     distance float default 0,
@@ -177,23 +196,18 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     start_date TIMESTAMP default Null,
     end_date TIMESTAMP default Null,
     remarks VARCHAR(255) default '',
-    event_percentage VARCHAR(4) default '',
+    event_percentage VARCHAR(10) default '',
     vessel_condition1 VARCHAR(15) default '', /**(Loaded/Ballast) */
     cargo_eta1 float default 0,
-    vessel_owner1 VARCHAR(255) default '',
     vessel_condition2 VARCHAR(15) default '', /**(Loaded/Ballast) */
     cargo_eta2 float default 0,
-    vessel_owner2 VARCHAR(255) default '',
     cargo_category_type  VARCHAR(255) default '',/* Crude, PMS, AGO, LPG etc.*/
-    vessel1_eta TIMESTAMP default Null,
-    vessel1_atd TIMESTAMP default Null,
-    vessel2_eta TIMESTAMP default Null,
-    vessel2_atd TIMESTAMP default Null,
     risk_level VARCHAR(10) default '',
     current_distance_nm float default 0,
     stationary_duration_hours float default 0,
     proximity_consistency VARCHAR(4) default '',
     data_points_analyzed float default 0,
+    estimated_cargo float default 0,
     operationmode  ENUM('', 'Loading','Discharge','STS') NOT NULL DEFAULT '', /* (Loading/Discharge/STS) */
     status  ENUM('', 'Ongoing','Completed','Historical') NOT NULL DEFAULT '', /* (Ongoing/Completed/Historical). */
     is_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
@@ -230,15 +244,24 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
     foreach ($vessels as $v1) {
         if( !empty( $v1['type'] ) && str_contains( $v1['type'], 'Tanker' ) ) {
             foreach ($vessels as $v2) {
-
-                if ($v1['uuid'] != $v2['uuid'] && str_contains($v2['type'], 'Tanker') ) { 
+                
+                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker') ) { 
                     
-                   // echo '<br>detecting:'.$v1['uuid'].' != '.$v2['uuid'];
-                    $detectresult = $detector->detectSTSTransfer($v1, $v2);
-                    if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
+                    $vehicle_one = isPointInPolygon($v1['lat'], $v1['lon'], wktToArray($polygon));
+                    $vehicle_two = isPointInPolygon($v2['lat'], $v2['lon'], wktToArray($polygon));
+                    
+                    //if( $vehicle_one || $vehicle_two ) 
+                    {
+                        if( !empty( $port_name ) ) {
+                            $zone_terminal_name = $port_name. ' STS Zone';
+                        }
+                        
+                        echo '<br>detecting:'.$v1['uuid'].' != '.$v2['uuid'];
+                        $detectresult = $detector->detectSTSTransfer($v1, $v2);
+                        if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
                             echo '<br>----sts_transfer_detected----'.$v1['uuid'].' != '.$v2['uuid']; print_r($detectresult);
                             
-                            $sql = "select id, vessel1_uuid, vessel2_uuid, is_email_sent from ".$table_name_sts." where ( ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and is_complete = 'No'";
+                            $sql = "select id, vessel1_uuid, vessel2_uuid, is_email_sent, vessel1_draught, vessel2_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel1_signal, vessel2_signal from ".$table_name_sts." where ( ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and is_complete = 'No'";
                             $result2 = $mysqli->query( $sql );
                             $num_rows = mysqli_num_rows( $result2 );
                             if( $num_rows == 0 ) {
@@ -255,13 +278,6 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 $pk_id = $result2->fetch_column();
                                 $ref_id = 'STS'.date('Ymd').str_pad( $pk_id, strlen( $pk_id ) + 4, '0', STR_PAD_LEFT);
                                 
-                                $v1_current_eta = date("Y-m-d H:i:s", $vehicel_1[ 'eta_epoch' ] );
-                                $v2_current_eta = date("Y-m-d H:i:s", $vehicel_2[ 'eta_epoch' ] );
-
-                                $v1_current_atd = date("Y-m-d H:i:s", $vehicel_1[ 'atd_epoch' ] );
-                                $v2_current_atd = date("Y-m-d H:i:s", $vehicel_2[ 'atd_epoch' ] );
-                                
-
                                 $predicted_cargo_1 = $detectresult['vessel_1']['predicted_cargo'];
                                 $predicted_cargo_2 = $detectresult['vessel_2']['predicted_cargo'];
 
@@ -278,18 +294,18 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
 
                                 $vessel_condition1 = $detectresult['vessel_1']['vessel_condition'];
                                 $cargo_eta1 = $detectresult['vessel_1']['cargo_eta'];
-                                $vessel_owner1 = $detectresult['vessel_1']['vessel_owner']; 
-
+                                
                                 $vessel_condition2 = $detectresult['vessel_2']['vessel_condition'];
                                 $cargo_eta2 = $detectresult['vessel_2']['cargo_eta'];
-                                $vessel_owner2 = $detectresult['vessel_2']['vessel_owner']; 
-                                $zone_terminal_name = $detectresult['zone_terminal_name']; 
+                                
                                 $operation_mode = $detectresult['operation_mode']; 
                                 $status = $detectresult['status']; 
                                 if( empty( $status ) ) {
                                     $status = 'Detected';
                                 }
-                                $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id, vessel1_eta, vessel1_atd, vessel2_eta, vessel2_atd,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,cargo_eta1, vessel_owner1,vessel_condition2,cargo_eta2, vessel_owner2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared)
+
+                                
+                                $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,cargo_eta1,vessel_condition2,cargo_eta2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared,vessel1_signal, vessel2_signal)
                                         VALUES (
                                             '" . $mysqli->real_escape_string($v1['uuid']) . "',
                                             '" . $mysqli->real_escape_string($v1['name']) . "',
@@ -321,20 +337,14 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             '" . $mysqli->real_escape_string( $port_name ) . "',
                                             '" . $mysqli->real_escape_string( $port_id ) . "',
                                             '".$last_updated."', NOW(), '".$ref_id."',
-                                            '".$v1_current_eta."', 
-                                            '".$v1_current_atd."', 
-                                            '".$v2_current_eta."', 
-                                            '".$v2_current_atd."', 
                                             '".$remarks."', 
                                             '".$confidence."', 
                                             '".$predicted_cargo_1."', 
                                             '".$risk_level."',
                                             '".$vessel_condition1."',
                                             '".$cargo_eta1."',
-                                            '".$vessel_owner1."',
                                             '".$vessel_condition2."',
                                             '".$cargo_eta2."',
-                                            '".$vessel_owner2."',
                                             '".$zone_terminal_name."',
                                             '".$operation_mode."',
                                             '".$status."',
@@ -342,7 +352,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             '".$stationary_duration_hours."',
                                             '".$proximity_consistency."',
                                             '".$data_points_analyzed."',
-                                            'No'
+                                            'No', 'AIS Consistent', 'AIS Consistent'
                                             )";
                             
                                 if ($mysqli->query( $sql ) !== TRUE) {
@@ -455,6 +465,12 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 }
                             } else {
                                 $row = mysqli_fetch_assoc($result2);
+                                $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
+                                $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
+
+                                $sql = "update ".$table_name_sts." set vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."' where id='".$row['id']."'";
+                                $mysqli->query($sql);
+                                
                                 $array_ids[] = $row['id'];
                                 $array_uidds[] = [ $row['vessel1_uuid'], $row['vessel2_uuid'] ];
                             }
@@ -466,10 +482,11 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
             }
         }
     }
+}
     
 if(  count( $array_ids ) == 0 ) {
     
-    $sql = "select id, vessel1_uuid, vessel2_uuid from ".$table_name_sts." where is_complete = 'No'";
+    $sql = "select id, vessel1_uuid, vessel2_uuid from ".$table_name_sts." where is_complete = 'No' and port='".$port_name."'";
     $result2 = $mysqli->query( $sql );
     $num_rows = mysqli_num_rows( $result2 );
     if( $num_rows > 0 ) {
@@ -480,33 +497,91 @@ if(  count( $array_ids ) == 0 ) {
     }
 }
 
-$sql = "select id, vessel1_uuid, vessel2_uuid from ".$table_name_sts." where is_complete='Yes' and is_disappeared = 'No'";
+$sql = "select id, vessel1_uuid, vessel2_uuid, end_date, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught, vessel1_completed_draught, vessel2_completed_draught from ".$table_name_sts." where is_disappeared = 'No' and port='".$port_name."' and end_date IS NOT NULL";
 $result3 = $mysqli->query( $sql );
 $num_rows = mysqli_num_rows( $result3 );
 if( $num_rows > 0 ) {
     while( $row = mysqli_fetch_array($result3, MYSQLI_ASSOC) ) {
         
-        $v1_current_draught = get_datalastic_field($row['vessel1_uuid'], 'current_draught', false);
-        $v2_current_draught = get_datalastic_field($row['vessel2_uuid'], 'current_draught', false);
+        $dateTime1 = new DateTime($row['end_date']);
+        $dateTime2 = new DateTime();
+        $interval = $dateTime1->diff($dateTime2);
+        
+        $v1 = get_datalastic_field($row['vessel1_uuid'], '', true);
+        $v2 = get_datalastic_field($row['vessel2_uuid'], '', true);
+        $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
+        $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
 
-        $sql = "update ".$table_name_sts." set is_disappeared = 'Yes', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."' where is_complete='Yes' and id='".$row['id']."'";
-        $mysqli->query($sql);
+        if( $interval->h <= 6 ) {
+            $updatable_fields = '';
+            
+            $v1_current_draught = $v1['current_draught'];
+            $updatable_fields = "vessel1_completed_draught='".floatval( $v1_current_draught )."'";
+
+            
+            $v2_current_draught = $v2['current_draught'];
+            $updatable_fields .= (!empty( $updatable_fields )?",":"")." vessel2_completed_draught='".floatval( $v2_current_draught )."'";
+
+            $estimated_cargo = 0;
+            if( ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
+            }
+
+            if( ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
+            }
+
+            if( !empty( $updatable_fields ) ) {
+                $sql = "update ".$table_name_sts." set ".$updatable_fields.",vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
+                $mysqli->query($sql);
+            }
+            
+        } else if( $interval->h >= 10 ) {
+            $v1_current_draught = $v1['current_draught'];
+            $v2_current_draught = $v2['current_draught'];
+            
+            $estimated_cargo = 0;
+            if( ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
+            }
+
+            if( ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
+            }
+
+            $sql = "update ".$table_name_sts." set is_disappeared = 'Yes',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
+            $mysqli->query($sql);
+        }
     }
 }
 
 if( count($array_ids) > 0 ) {
     $array_ids_implode = implode(',', $array_ids);
     
-    $sql = "select id, vessel1_uuid, vessel2_uuid from ".$table_name_sts." where is_complete='No' and id not in (".$array_ids_implode.")";
+    $sql = "select id, vessel1_uuid, vessel2_uuid, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught from ".$table_name_sts." where is_complete='No' and port='".$port_name."' and id not in (".$array_ids_implode.")";
     $result4 = $mysqli->query( $sql );
     $num_rows = mysqli_num_rows( $result4 );
     if( $num_rows > 0 ) {
         while( $row = mysqli_fetch_array($result4, MYSQLI_ASSOC) ) {
             
-            $v1_current_draught = get_datalastic_field($row['vessel1_uuid'], 'current_draught', false);
-            $v2_current_draught = get_datalastic_field($row['vessel2_uuid'], 'current_draught', false);
+            $estimated_cargo = 0;
+            $v1 = get_datalastic_field($row['vessel1_uuid'], '', true);
+            $v2 = get_datalastic_field($row['vessel2_uuid'], '', true);
+            $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
+            $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
+            
+            $v1_current_draught = $v1['current_draught'];
+            $v2_current_draught = $v2['current_draught'];
 
-            $sql = "update ".$table_name_sts." set is_complete = 'Yes', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW() where is_complete='No' and id='".$row['id']."'";
+            if( ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
+            }
+
+            if( ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) ) > 0 ) {
+                $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
+            }
+            
+            $sql = "update ".$table_name_sts." set is_complete = 'Yes',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
             $mysqli->query($sql);
         }
     }
