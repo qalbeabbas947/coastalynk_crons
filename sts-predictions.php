@@ -248,7 +248,7 @@ class STSTransferDetector {
         
         $stationaryHours = $analysis['stationary_hours'];
         
-        if ($stationaryHours >= 6) return 'Completed';
+        //if ($stationaryHours >= 6) return 'Completed';
         if ($stationaryHours >= 3) return 'Ongoing';
         
         return 'Detected';
@@ -379,10 +379,10 @@ class STSTransferDetector {
         );
         
         // Get additional required fields
-        $zoneTerminalName = $this->getZoneTerminalName(
-            $vessel1['position']['lat'] ?? 0,
-            $vessel1['position']['lon'] ?? 0
-        );
+        // $zoneTerminalName = $this->getZoneTerminalName(
+        //     $vessel1['position']['lat'] ?? 0,
+        //     $vessel1['position']['lon'] ?? 0
+        // );
         
         $vesselCondition1 = $this->getVesselCondition($vessel1);
         $vesselCondition2 = $this->getVesselCondition($vessel2);
@@ -400,7 +400,7 @@ class STSTransferDetector {
         
         return [
             'sts_transfer_detected' => $analysis['sts_detected'],
-            'zone_terminal_name' => $zoneTerminalName,
+            // 'zone_terminal_name' => $zoneTerminalName,
             'operation_mode' => $operationMode,
             'status' => $operationStatus,
             'vessel_1' => [
