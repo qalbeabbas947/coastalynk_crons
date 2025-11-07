@@ -426,12 +426,12 @@ class STSTransferDetector {
             'proximity_analysis' => [
                 'current_distance_nm' => round($analysis['current_distance_nm'], 3),
                 'stationary_duration_hours' => $analysis['stationary_hours'],
-                'proximity_consistency' => round($analysis['proximity_consistency'] * 100, 1) . '%',
+                'proximity_consistency' => number_format(round($analysis['proximity_consistency'] * 100, 1), 2,'.', '') . '%',
                 'data_points_analyzed' => $analysis['data_points_analyzed']
             ],
             'risk_assessment' => [
                 'risk_level' => $riskLevel,
-                'confidence' => $confidence . '%',
+                'confidence' => number_format($confidence, 2,'.', '') . '%',
                 'remarks' => $remarks
             ],
             'timestamp' => date('c'),

@@ -108,6 +108,25 @@ function coastalynk_update_summary($label, $total_figure) {
 }
 
 /**
+ * create log entry
+ */
+function coastalynk_log_entry($id, $description, $type='sts') {
+    global $table_prefix;
+    
+    $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
+    $table_sts_log = $table_prefix . 'coastalynk_sts_log';
+    $sql = "INSERT INTO $table_sts_log ( sts_id , description, vtype, date_added)
+                VALUES (
+                    '" . (!empty($id)?$mysqli->real_escape_string($id):'0') . "',
+                    '" . (!empty($description)?$mysqli->real_escape_string($description):'') . "',
+                    '" . (!empty($type)?$mysqli->real_escape_string($type):'') . "',
+                    NOW())";
+    if ($mysqli->query($sql) !== TRUE) {
+        echo "Error: " . $sql . "<br>" . $mysqli->error;
+    }
+}
+
+/**
  * Check if a point is inside a polygon using Ray Casting algorithm
  * 
  * @param float $pointLat Latitude of the point to check
