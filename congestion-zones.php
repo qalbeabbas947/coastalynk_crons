@@ -95,7 +95,7 @@ function wpdocs_show_vessels_congestion(  ) {
         $nigerian_zones[] = ['Bonny LNG Terminal', 4.4, 7.1];
         $nigerian_zones[] = ['Calabar Port Approach', 4.9, 8.3];
 
-        // ========== TERRITORIAL WATERS POINTS (12-24 NM) ==========
+        // ========== TERRITORIAL WATERS POINTS (12-24 NM) ========== Territorial
         $nigerian_zones[] = ['Lagos Offshore Zone', 6.0, 3.0];
         $nigerian_zones[] = ['Western Approaches', 5.7, 2.5];
         $nigerian_zones[] = ['Central Offshore', 4.8, 4.8];
@@ -108,8 +108,8 @@ function wpdocs_show_vessels_congestion(  ) {
         // ========== EEZ POINTS (24-200 NM) ==========
         $nigerian_zones[] = ['Western EEZ Deep', 5.0, 2.0];
         $nigerian_zones[] = ['Bonga FPSO Area', 4.2, 3.8];
-        $nigerian_zones[] = ['Western EEZ Central', 4.0, 3.0];
-        $nigerian_zones[] = ['Western EEZ Central', 3.7, 5.5];
+        $nigerian_zones[] = ['Western EEZ Central 1', 4.0, 3.0];
+        $nigerian_zones[] = ['Western EEZ Central 2', 3.7, 5.5];
         $nigerian_zones[] = ['Central EEZ North', 3.8, 4.6];
         $nigerian_zones[] = ['Agbami FPSO Area', 3.5, 5.4];
         $nigerian_zones[] = ['Akpo FPSO Area', 3.3, 6.2];
@@ -120,7 +120,6 @@ function wpdocs_show_vessels_congestion(  ) {
         $nigerian_zones[] = ['Deepwater Central', 2.5, 5.5];
         $nigerian_zones[] = ['Deepwater East', 2.2, 7.5,];
         
-
         $now = date('Y-m-d H:i:s');
         //while ($row = mysqli_fetch_assoc($result)) {
         echo '<pre>';

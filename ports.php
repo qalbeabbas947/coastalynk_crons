@@ -24,7 +24,9 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name (
     lat VARCHAR(255),
     lon VARCHAR(255),
     capacity int(4)  Not Null Default 50,
-    port_type VARCHAR(255)
+    port_type VARCHAR(255),
+   `radius` float NOT NULL DEFAULT 10,
+   `port_area` polygon NOT NULL
 )";
 if ($mysqli->query($sql) !== TRUE) {
     echo "Error: " . $sql . "<br>" . $mysqli->error;
