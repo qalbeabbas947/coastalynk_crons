@@ -91,7 +91,7 @@ function get_datalastic_field( $uuid, $field = 'navigation_status', $is_full = t
 $detector = new STSTransferDetector( $api_key );
 $table_name = $table_prefix . 'coastalynk_ports';
 $zone_terminal_name = '';
-$sql = "select *, ST_AsText(port_area) as port_area from ".$table_name." where country_iso='NG' and port_type in( 'Coastal Zone', 'Territorial Zone', 'EEZ' ) order by title";
+$sql = "select *, ST_AsText(port_area) as port_area from ".$table_name." where country_iso='NG' and port_type in( 'Port', 'Coastal Zone', 'Territorial Zone', 'EEZ' ) order by title";
 $candidates = [];
 $last_updated = date('Y-m-d H:i:s');
 $port_id = '';
@@ -148,12 +148,17 @@ if( empty( $port_name ) ) {
             if(  in_array( $port_data['port_name'], $ports )) {
                 $port_id = $port_data['uuid'];
                 $port_name = $port_data['port_name'];
+                
             }
         }
 
         if( empty( $port_name ) ) {
             $port_id = $data['data'][0]['uuid'];
             $port_name = $data['data'][0]['port_name'];
+        }
+
+        if( 'lagos' == strtolower( $port_name )) {
+            $port_name = 'Lagos Complex';
         }
     } 
 }
@@ -259,7 +264,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     $is_sts_zone = 'No';
                     if( $vehicle_one || $vehicle_two ) {
                         if( !empty( $port_name ) ) {
-                            $zone_terminal_name = $port_name. ' STS Zone';
+                            $zone_terminal_name = $port_name;
                             $is_sts_zone = 'Yes';
                         }
                     }
@@ -535,7 +540,7 @@ if( $num_rows > 0 ) {
 
         $total_hours = $interval->days * 24 + $interval->h + ($interval->i / 60) + ($interval->s / 3600);
 
-        if( $total_hours <= 6 ) {
+        if( $total_hours <= 8 ) {
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
                 $status = 'No Change';
@@ -547,8 +552,8 @@ if( $num_rows > 0 ) {
             $sql = "update ".$table_name_sts." set ".$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
             $mysqli->query($sql);
 
-            coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 6hrs: '.$log, 'sts');
-        } else if( $total_hours <= 10 && $total_hours > 6  ) {
+            coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 8hrs: '.$log, 'sts');
+        } else if( $total_hours <= 12 && $total_hours > 8  ) {
 
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
@@ -562,7 +567,7 @@ if( $num_rows > 0 ) {
             $sql = "update ".$table_name_sts." set ".$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
             $mysqli->query($sql);
 
-            coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 10hrs: '.$log, 'sts');
+            coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 12hrs: '.$log, 'sts');
         } else if( $total_hours >= 24 ) {
             
             $status = 'Completed';
