@@ -71,13 +71,20 @@ function haversineDistance($lat1, $lon1, $lat2, $lon2) {
 function get_datalastic_field( $uuid, $field = 'navigation_status', $is_full = true ) {
     
     global $api_key;
+   sleep(1); 
     $url = 'https://api.datalastic.com/api/v0/vessel_pro?api-key='.urlencode($api_key).'&uuid='.$uuid;
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
     curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '.$api_key));
     $output = curl_exec($ch);
+    $error = curl_error($ch);
     curl_close($ch);
+    if ($error) {
+        sleep(1);
+        get_datalastic_field( $uuid, $field, $is_full );
+    }
+
     $data = json_decode($output, true);
 
     if( $is_full ) {
@@ -107,7 +114,10 @@ if ($result = $mysqli->query($sql)) {
                 $obj->lat,
                 $obj->lon
             );
-        echo '<br>'.$port_link_index++.':       <a href="'.$url.'" target="_blank">	wget -O /dev/null "'.$url.'"</a>';
+        echo '<br>'.$port_link_index++.' '.$obj->title.': <a href="'.$url.'" target="_blank">';
+        echo $url;
+        echo '</a>';
+        echo '<br>'.$port_link_index.' '.$obj->title.' :       <a href="'.$url.'" target="_blank">	wget -O /dev/null "'.$url.'"</a>';
         if( number_format($_REQUEST['lat'], 2) == number_format( $obj->lat, 2) && number_format( $_REQUEST['lon'], 2) == number_format( $obj->lon, 2) ) {
             $port_id = $obj->port_id;
             $port_name = $obj->title;
@@ -182,7 +192,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     vessel1_draught float default 0,
     vessel1_completed_draught float default 0,
     vessel1_last_position_UTC TIMESTAMP,
-    vessel1_signal ENUM('', 'Gap','Consistent') NOT NULL DEFAULT '',
+    vessel1_signal ENUM('', 'AIS Gap','AIS Consistent') NOT NULL DEFAULT '',
     vessel2_uuid VARCHAR(50) default '',
     vessel2_name VARCHAR(255) default '',
     vessel2_mmsi VARCHAR(50) default '',
@@ -204,14 +214,12 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     event_ref_id VARCHAR(30) default '', /* e.g. STS20251017-0001 */
     is_sts_zone ENUM('No','Yes') NOT NULL DEFAULT 'No',
     zone_terminal_name VARCHAR(255) default '',
-    start_date TIMESTAMP default '',
-    end_date TIMESTAMP default '',
+    start_date TIMESTAMP default Null,
+    end_date TIMESTAMP default Null,
     remarks VARCHAR(255) default '',
     event_percentage VARCHAR(20) default '',
     vessel_condition1 VARCHAR(15) default '', /**(Loaded/Ballast) */
-    cargo_eta1 float default 0,
     vessel_condition2 VARCHAR(15) default '', /**(Loaded/Ballast) */
-    cargo_eta2 float default 0,
     cargo_category_type  VARCHAR(255) default '',/* Crude, PMS, AGO, LPG etc.*/
     risk_level VARCHAR(10) default '',
     current_distance_nm float default 0,
@@ -219,8 +227,9 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     proximity_consistency VARCHAR(20) default '',
     data_points_analyzed float default 0,
     estimated_cargo float default 0,
+    mother_vessel_number TINYINT(1) NULL DEFAULT '0', 
     operationmode  ENUM('', 'Loading','Discharge','STS') NOT NULL DEFAULT '', /* (Loading/Discharge/STS) */
-    status  ENUM('','Ongoing','Completed','No Change','Pending Manual Review', 'Awaiting Draught Update') NOT NULL DEFAULT '', /* (Ongoing/Completed/Historical). */
+    status varchar(30) NOT NULL DEFAULT '',
     is_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
     is_complete ENUM('No','Yes') NOT NULL DEFAULT 'No',
     is_disappeared ENUM('No','Yes') NOT NULL DEFAULT 'No',
@@ -263,7 +272,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     
                     $is_sts_zone = 'No';
                     if( $vehicle_one || $vehicle_two ) {
-                        if( !empty( $port_name ) ) {
+                        if( ! empty( $port_name ) ) {
                             $zone_terminal_name = $port_name;
                             $is_sts_zone = 'Yes';
                         }
@@ -305,10 +314,8 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $timestamp      = $detectresult['timestamp'];
 
                             $vessel_condition1 = $detectresult['vessel_1']['vessel_condition'];
-                            $cargo_eta1 = $detectresult['vessel_1']['cargo_eta'];
                             
                             $vessel_condition2 = $detectresult['vessel_2']['vessel_condition'];
-                            $cargo_eta2 = $detectresult['vessel_2']['cargo_eta'];
                             
                             $operation_mode = $detectresult['operation_mode']; 
                             $status = $detectresult['status']; 
@@ -317,7 +324,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             }
 
                             
-                            $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,cargo_eta1,vessel_condition2,cargo_eta2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared,vessel1_signal, vessel2_signal, is_sts_zone)
+                            $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,vessel_condition2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared,vessel1_signal, vessel2_signal, is_sts_zone)
                                     VALUES (
                                         '" . $mysqli->real_escape_string($v1['uuid']) . "',
                                         '" . $mysqli->real_escape_string($v1['name']) . "',
@@ -354,9 +361,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$predicted_cargo_1."', 
                                         '".$risk_level."',
                                         '".$vessel_condition1."',
-                                        '".$cargo_eta1."',
                                         '".$vessel_condition2."',
-                                        '".$cargo_eta2."',
                                         '".$zone_terminal_name."',
                                         '".$operation_mode."',
                                         '".$status."',
@@ -366,7 +371,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$data_points_analyzed."',
                                         'No', 'AIS Consistent', 'AIS Consistent', '".$is_sts_zone."'
                                         )";
-                        
+                        echo  $sql;
                             if ($mysqli->query( $sql ) !== TRUE) {
                                 echo "Error: " . $sql . "<br>" . $mysqli->error;
                             } else {
@@ -522,11 +527,18 @@ if( $num_rows > 0 ) {
         $log .= ', Vessel 2 Draught Difference: '.$draught_2_diff;
         $log .= ', Vessel 1 Signal: '.$vessel1_signal;
         $log .= ', Vessel 2 Signal: '.$vessel2_signal;
-
-        if( $draught_1_diff > 0 ) {
+        
+        $mother_vessel_number = '';
+        if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
             $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] ) ) / 1000;
-        } else if( $draught_2_diff > 0 ) {
+            if( $estimated_cargo > 0 ) {
+                $mother_vessel_number = " mother_vessel_number = '2',";
+            }
+        } else if( $draught_2_diff >= 0.3 || $draught_2_diff <= -0.3 ) {
             $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] ) ) / 1000;
+            if( $estimated_cargo > 0 ) {
+                $mother_vessel_number = " mother_vessel_number = '1',";
+            }
         }
         
         $updatable_fields = '';
@@ -539,45 +551,66 @@ if( $num_rows > 0 ) {
         }
 
         $total_hours = $interval->days * 24 + $interval->h + ($interval->i / 60) + ($interval->s / 3600);
+        
+        // if( $draught_1_diff >= 0.3 ) {
+        //     $mother_vessel_number = " mother_vessel_number = '2',";
+        // } else if( $draught_2_diff >= 0.3 ) {
+        //     $mother_vessel_number = " mother_vessel_number = '1',";
+        // }
+        
+        // if( $total_hours <= 8 ) {
+        //     $status = 'Completed';
+        //     if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
+        //         $status = 'No Change';
+        //     } else {
+        //         if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
+        //             $status = 'Inconclusive';
+        //         } else {
+        //             $updatable_fields .= " is_disappeared = 'Yes', ";
+        //         }
+        //     }
 
-        if( $total_hours <= 8 ) {
-            $status = 'Completed';
-            if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
-                $status = 'No Change';
-            } else {
-                $updatable_fields .= " is_disappeared = 'Yes', ";
-            }
+        //     $log .= ', Status: '.$status;
+        //     $sql = "update ".$table_name_sts." set ".$mother_vessel_number.$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
+        //     $mysqli->query($sql);
 
-            $log .= ', Status: '.$status;
-            $sql = "update ".$table_name_sts." set ".$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
-            $mysqli->query($sql);
-
-            coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 8hrs: '.$log, 'sts');
-        } else if( $total_hours <= 12 && $total_hours > 8  ) {
+        //     coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 8hrs: '.$log, 'sts');
+        // } else 
+        if( $total_hours <= 9 && $total_hours >= 6  ) {
 
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
                 $status = 'Awaiting Draught Update';
             } else {
-                $updatable_fields .= " is_disappeared = 'Yes', ";
+                if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
+                    $status = 'Inconclusive';
+                } 
+                // else {
+                //     //$updatable_fields .= " is_disappeared = 'Yes', ";
+                // }
             }
 
             $log .= ', Status:'.$status;
 
-            $sql = "update ".$table_name_sts." set ".$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
+            $sql = "update ".$table_name_sts." set ".$mother_vessel_number.$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
             $mysqli->query($sql);
 
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 12hrs: '.$log, 'sts');
-        } else if( $total_hours >= 24 ) {
+        } else 
+        if( $total_hours >= 24 ) {
             
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
                 $status = 'Pending Manual Review';
+            } else {
+                if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
+                    $status = 'Inconclusive';
+                }
             }
             
             $log .= ', Status:'.$status;
 
-            $sql = "update ".$table_name_sts." set ".$updatable_fields." is_disappeared = 'Yes', status = '".$status."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
+            $sql = "update ".$table_name_sts." set status = '".$status."',last_updated = NOW() where id='".$row['id']."'";
             $mysqli->query($sql);
 
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after 24hrs: '.$log, 'sts');
@@ -601,23 +634,37 @@ if( count( $array_ids ) > 0 ) {
             $estimated_cargo = 0;
             $v1 = get_datalastic_field( $row['vessel1_uuid'], '', true );
             $v2 = get_datalastic_field( $row['vessel2_uuid'], '', true );
+            
             $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
             $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
             
             $v1_current_draught = $v1['current_draught'];
             $v2_current_draught = $v2['current_draught'];
+          
 
             $draught_1_diff = ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) );
             $draught_2_diff = ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) );
-            if( $draught_1_diff > 0 ) {
+            
+            if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
                 $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
-            } else if( $draught_2_diff > 0 ) {
+            } else if( $draught_2_diff >= 0.3 || $draught_2_diff <= -0.3 ) {
                 $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
             }
-
+            
+            $mother_vessel_number = '';
+            if( $draught_1_diff >= 0.3 && $draught_1_diff <= -0.3 ) {
+                $mother_vessel_number = " mother_vessel_number = '1',";
+            } else if( $draught_2_diff >= 0.3 && $draught_2_diff <= -0.3 ) {
+                $mother_vessel_number = " mother_vessel_number = '2',";
+            }
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
-                $status = 'No Change';
+                $status = 'Ongoing';
+            } else {
+                
+                if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
+                    $status = 'Inconclusive';
+                }
             }
 
             $log = 'Vessel 1 Draught Difference: '.$draught_1_diff;
@@ -625,7 +672,7 @@ if( count( $array_ids ) > 0 ) {
             $log .= ', Vessel 1 Signal: '.$vessel1_signal;
             $log .= ', Vessel 2 Signal: '.$vessel2_signal;
             
-            $sql = "update ".$table_name_sts." set is_complete = 'Yes', status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
+            $sql = "update ".$table_name_sts." set ".$mother_vessel_number."is_complete = 'Yes', status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
             $mysqli->query($sql);
 
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after vessels leave the area: '.$log, 'sts');
