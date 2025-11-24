@@ -431,7 +431,7 @@ class STSTransferDetector {
             ],
             'risk_assessment' => [
                 'risk_level' => $riskLevel,
-                'confidence' => number_format($confidence, 2,'.', '') . '%',
+                'confidence' => number_format($confidence, 2,'.', ''),
                 'remarks' => $remarks
             ],
             'timestamp' => date('c'),
