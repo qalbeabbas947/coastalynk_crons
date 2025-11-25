@@ -117,18 +117,18 @@ $port_radius = 10;
 
 $detector = new STSTransferDetector( $api_key );
 $table_name = $table_prefix . 'coastalynk_ports';
-$sql = "SELECT *, ST_Distance_Sphere( POINT(lat, lon), POINT($param_lat, $param_lon) ) AS distance_meters FROM wp_coastalynk_ports where country_iso='NG' and port_type in( 'Port', 'Coastal Zone', 'Territorial Zone', 'EEZ' ) HAVING distance_meters is not null order by distance_meters asc limit 1;";
+$sql = "SELECT *, ST_Distance_Sphere( POINT(lat, lon), POINT($param_lat, $param_lon) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type in( 'Port', 'Coastal Zone', 'Territorial Zone', 'EEZ' ) HAVING distance_meters is not null order by distance_meters asc limit 1;";
 if ($result = $mysqli->query($sql)) {
     if( $obj = $result->fetch_object() ) {
         $port_id = $obj->port_id;
         $port_name = $obj->title;
         $polygon = $obj->port_area;
         $zone_terminal_name = $port_name;
+        $zone_type  = $obj->port_type; 
+        $zone_ship  = "N/A";
         $port_radius = floatval( $obj->radius ) > 0 ? floatval( $obj->radius ): 10;
     }
 }
-echo $port_id;
-echo $port_name;
 
 // $sql = "select *, ST_AsText(port_area) as port_area from ".$table_name." where country_iso='NG' and port_type in( 'Port', 'Coastal Zone', 'Territorial Zone', 'EEZ' ) order by title";
 
@@ -302,39 +302,40 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     $detectresult = $detector->detectSTSTransfer($v1, $v2);
                     if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
                         
-                        $zone_type = '';
+                        $zone_type = 'No STS Zone';
                         $zone_ship = '';
+                        $new_zone_terminal_name = $zone_terminal_name;
                         $param_v1_lat = floatval( $v1['lat'] );
                         $param_v1_lon = floatval( $v1['lon'] );
-                        $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v1_lon, $param_v1_lat) ) AS distance_meters FROM wp_coastalynk_ports where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
+                        $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v1_lon, $param_v1_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
                         if( $result = $mysqli->query($sql) ) {
                             if( $obj = $result->fetch_object() ) {
                                 $zone_type  = $obj->port_type;
                                 $zone_ship  = "Mother Ship";
-                                $zone_terminal_name = $obj->title;
+                                $new_zone_terminal_name = $obj->title;
                             }
                         }
 
                         $param_v2_lat = floatval( $v2['lat'] );
                         $param_v2_lon = floatval( $v2['lon'] );
                         if( empty( $zone_type ) ) {
-                            $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v2_lon, $param_v2_lat) ) AS distance_meters FROM wp_coastalynk_ports where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
+                            $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v2_lon, $param_v2_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
                             if( $result = $mysqli->query($sql) ) {
                                 if( $obj = $result->fetch_object() ) {
                                     $zone_type  = $obj->port_type; 
                                     $zone_ship  = "Daughter Ship";
-                                    $zone_terminal_name = $obj->title;
+                                    $new_zone_terminal_name = $obj->title;
                                 }
                             }
                         }
                         
                         if( empty( $zone_type ) ) {
-                            $sql = "SELECT * FROM wp_coastalynk_ports WHERE MBRWithin( POINT($param_v1_lon, $param_v1_lat), port_area ) limit 1;";
+                            $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v1_lon, $param_v1_lat), port_area ) limit 1;";
                             if( $result = $mysqli->query($sql) ) {
                                 if( $obj = $result->fetch_object() ) {
                                     $zone_type  = $obj->port_type; 
                                     $zone_ship  = "Mother Ship";
-                                    $zone_terminal_name = $obj->title;
+                                    $new_zone_terminal_name = $obj->title;
                                 }
                             }
 
@@ -350,19 +351,16 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         }
 
                         if( empty( $zone_type ) ) {
-                            $sql = "SELECT * FROM wp_coastalynk_ports WHERE MBRWithin( POINT($param_v2_lon, $param_v2_lat), port_area ) limit 1;";
+                            $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v2_lon, $param_v2_lat), port_area ) limit 1;";
                             if( $result = $mysqli->query($sql) ) {
                                 if( $obj = $result->fetch_object() ) {
                                     $zone_type  = $obj->port_type; 
                                     $zone_ship  = "Mother Ship";
-                                    $zone_terminal_name = $obj->title;
+                                    $new_zone_terminal_name = $obj->title;
                                 }
                             }
                         }
-                        echo '<br>zone_type:'.$zone_type; 
-                        echo '<br>zone_ship:'.$zone_ship;
-                        echo '<br>zone_terminal_name:'.$zone_terminal_name;
-
+                        
                         $sql = "select id, vessel1_uuid, vessel2_uuid, is_email_sent, vessel1_draught, vessel2_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel1_signal, vessel2_signal from ".$table_name_sts." where ( ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and is_disappeared = 'No'";
                         $result2 = $mysqli->query( $sql );
                         $num_rows = mysqli_num_rows( $result2 );
@@ -443,7 +441,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$risk_level."',
                                         '".$vessel_condition1."',
                                         '".$vessel_condition2."',
-                                        '".$zone_terminal_name."',
+                                        '".$new_zone_terminal_name."',
                                         '".$operation_mode."',
                                         '".$status."',
                                         '".$current_distance_nm."',
@@ -452,7 +450,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$data_points_analyzed."',
                                         'No', 'AIS Consistent', 'AIS Consistent', '".$zone_type."', '".$zone_ship."'
                                         )";
-                        echo  $sql;
+                        
                             if ($mysqli->query( $sql ) !== TRUE) {
                                 echo "Error: " . $sql . "<br>" . $mysqli->error;
                             } else {
