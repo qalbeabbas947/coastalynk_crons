@@ -201,6 +201,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     vessel1_completed_draught float default 0,
     vessel1_last_position_UTC TIMESTAMP,
     vessel1_signal ENUM('', 'AIS Gap','AIS Consistent') NOT NULL DEFAULT '',
+    vessel1_deadweight FLOAT NULL DEFAULT '0',
     vessel2_uuid VARCHAR(50) default '',
     vessel2_name VARCHAR(255) default '',
     vessel2_mmsi VARCHAR(50) default '',
@@ -216,6 +217,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     vessel2_completed_draught float default 0,
     vessel2_last_position_UTC TIMESTAMP,
     vessel2_signal ENUM('', 'AIS Gap','AIS Consistent') NOT NULL DEFAULT '',
+    vessel2_deadweight FLOAT NULL DEFAULT '0',
     port VARCHAR(255) default '',
     port_id VARCHAR(50) default '',
     distance float default 0,
@@ -227,8 +229,8 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     end_date TIMESTAMP default Null,
     remarks VARCHAR(255) default '',
     event_percentage float default 0,
-    vessel_condition1 VARCHAR(15) default '', /**(Loaded/Ballast) */
-    vessel_condition2 VARCHAR(15) default '', /**(Loaded/Ballast) */
+    draught_change FLOAT NULL , /**(Loaded/Ballast) */
+    event_desc VARCHAR(255) NULL, /**(Loaded/Ballast) */
     cargo_category_type  VARCHAR(255) default '',/* Crude, PMS, AGO, LPG etc.*/
     risk_level VARCHAR(10) default '',
     current_distance_nm float default 0,
@@ -237,7 +239,7 @@ $sql = "CREATE TABLE IF NOT EXISTS $table_name_sts (
     data_points_analyzed float default 0,
     estimated_cargo float default 0,
     mother_vessel_number TINYINT(1) NULL DEFAULT '0', 
-    operationmode  ENUM('', 'Loading','Discharge','STS') NOT NULL DEFAULT '', /* (Loading/Discharge/STS) */
+    operationmode VARCHAR(20) default '',
     status varchar(30) NOT NULL DEFAULT '',
     is_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
     is_complete ENUM('No','Yes') NOT NULL DEFAULT 'No',
@@ -270,330 +272,340 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
     $vessels = $data['data']['vessels'];
     
     // Check proximity
-    // foreach ($vessels as $v1) {
-    //     if( !empty( $v1['type'] ) && str_contains( $v1['type'], 'Tanker' ) ) {
+    foreach ($vessels as $v1) {
+        echo '<br>detecting top:'.$v1['uuid'].' != ';
+        if( !empty( $v1['type'] ) && str_contains( $v1['type'], 'Tanker' ) ) {
             
-    //         foreach ($vessels as $v2) {
-                
-    //             if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker')) {  // && $test_fetch <=2
+            foreach ($vessels as $v2) {
+                echo '<br>detecting innre:'.$v2['uuid'].' != ';
+                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker')) {  // && $test_fetch <=2
                     
-    //                 echo '<br>detecting:'.$v1['uuid'].' != '.$v2['uuid'];                    
-    //                 $detectresult = $detector->detectSTSTransfer($v1, $v2);
-    //                 if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
+                    echo '<br>detecting:'.$v1['uuid'].' != '.$v2['uuid'];                    
+                    $detectresult = $detector->detectSTSTransfer($v1, $v2);
+                    if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
                         
-    //                     $zone_type = 'No STS Zone';
-    //                     $zone_ship = '';
-    //                     $new_zone_terminal_name = $zone_terminal_name;
-    //                     $param_v1_lat = floatval( $v1['lat'] );
-    //                     $param_v1_lon = floatval( $v1['lon'] );
-    //                     $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v1_lon, $param_v1_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
-    //                     if( $result = $mysqli->query($sql) ) {
-    //                         if( $obj = $result->fetch_object() ) {
-    //                             $zone_type  = $obj->port_type;
-    //                             //$zone_ship  = $v1['name'];
-    //                             $new_zone_terminal_name = $obj->title;
-    //                         }
-    //                     }
+                        $zone_type = 'No STS Zone';
+                        $zone_ship = '';
+                        $new_zone_terminal_name = $zone_terminal_name;
+                        $param_v1_lat = floatval( $v1['lat'] );
+                        $param_v1_lon = floatval( $v1['lon'] );
+                        $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v1_lon, $param_v1_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
+                        if( $result = $mysqli->query($sql) ) {
+                            if( $obj = $result->fetch_object() ) {
+                                $zone_type  = $obj->port_type;
+                                //$zone_ship  = $v1['name'];
+                                $new_zone_terminal_name = $obj->title;
+                            }
+                        }
 
-    //                     $param_v2_lat = floatval( $v2['lat'] );
-    //                     $param_v2_lon = floatval( $v2['lon'] );
-    //                     if( empty( $zone_type ) ) {
-    //                         $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v2_lon, $param_v2_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
-    //                         if( $result = $mysqli->query($sql) ) {
-    //                             if( $obj = $result->fetch_object() ) {
-    //                                 $zone_type  = $obj->port_type; 
-    //                                 //$zone_ship  = $v2['name'];
-    //                                 $new_zone_terminal_name = $obj->title;
-    //                             }
-    //                         }
-    //                     }
+                        $param_v2_lat = floatval( $v2['lat'] );
+                        $param_v2_lon = floatval( $v2['lon'] );
+                        if( empty( $zone_type ) ) {
+                            $sql = "SELECT *, ST_Distance_Sphere( POINT(lon, lat), POINT($param_v2_lon, $param_v2_lat) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type = 'PBA' HAVING distance_meters is not null and distance_meters > 5557 order by distance_meters asc limit 1;";
+                            if( $result = $mysqli->query($sql) ) {
+                                if( $obj = $result->fetch_object() ) {
+                                    $zone_type  = $obj->port_type; 
+                                    //$zone_ship  = $v2['name'];
+                                    $new_zone_terminal_name = $obj->title;
+                                }
+                            }
+                        }
                         
-    //                     if( empty( $zone_type ) ) {
-    //                         $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v1_lon, $param_v1_lat), port_area ) limit 1;";
-    //                         if( $result = $mysqli->query($sql) ) {
-    //                             if( $obj = $result->fetch_object() ) {
-    //                                 $zone_type  = $obj->port_type; 
-    //                                 //$zone_ship  = $v1['name'];
-    //                                 $new_zone_terminal_name = $obj->title;
-    //                             }
-    //                         }
-    //                     }
+                        if( empty( $zone_type ) ) {
+                            $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v1_lon, $param_v1_lat), port_area ) limit 1;";
+                            if( $result = $mysqli->query($sql) ) {
+                                if( $obj = $result->fetch_object() ) {
+                                    $zone_type  = $obj->port_type; 
+                                    //$zone_ship  = $v1['name'];
+                                    $new_zone_terminal_name = $obj->title;
+                                }
+                            }
+                        }
 
-    //                     if( empty( $zone_type ) ) {
-    //                         $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v2_lon, $param_v2_lat), port_area ) limit 1;";
-    //                         if( $result = $mysqli->query($sql) ) {
-    //                             if( $obj = $result->fetch_object() ) {
-    //                                 $zone_type  = $obj->port_type; 
-    //                                 //$zone_ship  = $v2['name'];
-    //                                 $new_zone_terminal_name = $obj->title;
-    //                             }
-    //                         }
-    //                     }
+                        if( empty( $zone_type ) ) {
+                            $sql = "SELECT * FROM ".$table_name." WHERE MBRWithin( POINT($param_v2_lon, $param_v2_lat), port_area ) limit 1;";
+                            if( $result = $mysqli->query($sql) ) {
+                                if( $obj = $result->fetch_object() ) {
+                                    $zone_type  = $obj->port_type; 
+                                    //$zone_ship  = $v2['name'];
+                                    $new_zone_terminal_name = $obj->title;
+                                }
+                            }
+                        }
                         
-    //                     $sql = "select id, vessel1_uuid, vessel2_uuid, is_email_sent, vessel1_draught, vessel2_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel1_signal, vessel2_signal from ".$table_name_sts." where ( ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and is_disappeared = 'No'";
-    //                     $result2 = $mysqli->query( $sql );
-    //                     $num_rows = mysqli_num_rows( $result2 );
-    //                     if( $num_rows == 0 ) {
-    //                         $vehicel_1 = get_datalastic_field( $v1['uuid'], '', true );
-    //                         $vehicel_2 = get_datalastic_field( $v2['uuid'], '', true );
+                        $sql = "select id, vessel1_uuid, vessel2_uuid, is_email_sent, vessel1_draught, vessel2_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel1_signal, vessel2_signal from ".$table_name_sts." where ( ( vessel1_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel2_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( vessel2_uuid='".$mysqli->real_escape_string($v1['uuid'])."' and vessel1_uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and is_disappeared = 'No'";
+                        $result2 = $mysqli->query( $sql );
+                        $num_rows = mysqli_num_rows( $result2 );
+                        if( $num_rows == 0 ) {
+                            $vehicel_1 = get_datalastic_field( $v1['uuid'], '', true );
+                            $vehicel_2 = get_datalastic_field( $v2['uuid'], '', true );
 
-    //                         $vehicel_1_detail = search_vessel_by_name( $v1['name'], $v1['mmsi'] );
-    //                         $vehicel_2_detail = search_vessel_by_name( $v2['name'], $v2['mmsi'] );
-    //                         $mother_vessel_number = $mother_ship = 0;
+                            $vehicel_1_detail = search_vessel_by_name( $v1['name'], $v1['mmsi'] );
+                            $vehicel_2_detail = search_vessel_by_name( $v2['name'], $v2['mmsi'] );
+                            $mother_vessel_number = $mother_ship = 0;
                             
-    //                         if( $vehicel_1_detail && $vehicel_2_detail ) {
-    //                             if( floatval( $vehicel_1_detail['gross_tonnage'] ) > 0 && floatval( $vehicel_2_detail['gross_tonnage'] ) > 0 ) {
-    //                                 if( floatval( $vehicel_1_detail['gross_tonnage'] ) > floatval( $vehicel_2_detail['gross_tonnage'] ) ) {
-    //                                     $mother_vessel_number = $mother_ship = 1;
-    //                                     $zone_ship  = $v['name'];
-    //                                 } else {
-    //                                     $mother_vessel_number = $mother_ship = 2;
-    //                                     $zone_ship  = $v2['name'];
-    //                                 }
-    //                             }
+                            if( $vehicel_1_detail && $vehicel_2_detail ) {
+                                if( floatval( $vehicel_1_detail['gross_tonnage'] ) > 0 && floatval( $vehicel_2_detail['gross_tonnage'] ) > 0 ) {
+                                    if( floatval( $vehicel_1_detail['gross_tonnage'] ) > floatval( $vehicel_2_detail['gross_tonnage'] ) ) {
+                                        $mother_vessel_number = $mother_ship = 1;
+                                        $zone_ship  = $v['name'];
+                                    } else {
+                                        $mother_vessel_number = $mother_ship = 2;
+                                        $zone_ship  = $v2['name'];
+                                    }
+                                }
 
-    //                             if( $mother_ship == 0 ) {
-    //                                 if( floatval( $vehicel_1['current_draught'] ) > 0 && floatval( $vehicel_2['current_draught'] ) > 0 ) {
-    //                                     if( floatval( $vehicel_1['current_draught'] ) > floatval( $vehicel_2['current_draught'] ) ) {
-    //                                         $mother_vessel_number = $mother_ship = 1;
-    //                                         $zone_ship  = $v1['name'];
-    //                                     } else {
-    //                                         $mother_vessel_number = $mother_ship = 2;
-    //                                         $zone_ship  = $v2['name'];
-    //                                     }
-    //                                 }
-    //                             }
+                                if( $mother_ship == 0 ) {
+                                    if( floatval( $vehicel_1['current_draught'] ) > 0 && floatval( $vehicel_2['current_draught'] ) > 0 ) {
+                                        if( floatval( $vehicel_1['current_draught'] ) > floatval( $vehicel_2['current_draught'] ) ) {
+                                            $mother_vessel_number = $mother_ship = 1;
+                                            $zone_ship  = $v1['name'];
+                                        } else {
+                                            $mother_vessel_number = $mother_ship = 2;
+                                            $zone_ship  = $v2['name'];
+                                        }
+                                    }
+                                }
 
-    //                             if( $mother_ship == 0 ) {
-    //                                 if( floatval( $vehicel_1_detail['length'] ) > 0 && floatval( $vehicel_2_detail['length'] ) > 0 ) {
-    //                                     if( floatval( $vehicel_1_detail['length'] ) > floatval( $vehicel_2_detail['length'] ) ) {
-    //                                         $mother_vessel_number = $mother_ship = 1;
-    //                                         $zone_ship  = $v1['name'];
-    //                                     } else {
-    //                                         $mother_vessel_number = $mother_ship = 2;
-    //                                         $zone_ship  = $v2['name'];
-    //                                     }
-    //                                 }
-    //                             }
-    //                         }
+                                if( $mother_ship == 0 ) {
+                                    if( floatval( $vehicel_1_detail['length'] ) > 0 && floatval( $vehicel_2_detail['length'] ) > 0 ) {
+                                        if( floatval( $vehicel_1_detail['length'] ) > floatval( $vehicel_2_detail['length'] ) ) {
+                                            $mother_vessel_number = $mother_ship = 1;
+                                            $zone_ship  = $v1['name'];
+                                        } else {
+                                            $mother_vessel_number = $mother_ship = 2;
+                                            $zone_ship  = $v2['name'];
+                                        }
+                                    }
+                                }
+                            }
 
 
-    //                         $dist = haversineDistance( $v1['lat'], $v1['lon'], $v2['lat'], $v2['lon'] );
-    //                         $v1_navigation_status = $vehicel_1[ 'navigation_status' ];
-    //                         $v2_navigation_status = $vehicel_2[ 'navigation_status' ];
+                            $dist = haversineDistance( $v1['lat'], $v1['lon'], $v2['lat'], $v2['lon'] );
+                            $v1_navigation_status = $vehicel_1[ 'navigation_status' ];
+                            $v2_navigation_status = $vehicel_2[ 'navigation_status' ];
 
-    //                         $v1_current_draught = floatval( $vehicel_1[ 'current_draught' ]);
-    //                         $v2_current_draught = floatval( $vehicel_2[ 'current_draught' ]);
-    //                         $sql = "select max(id) as id from ".$table_name_sts;
-    //                         $result2 = $mysqli->query($sql);
-    //                         $pk_id = $result2->fetch_column();
-    //                         $ref_id = 'STS'.date('Ymd').str_pad( $pk_id, strlen( $pk_id ) + 4, '0', STR_PAD_LEFT);
+                            $vessel1_deadweight = floatval($vehicel_1_detail[ 'deadweight' ]);
+                            $vessel2_deadweight = floatval($vehicel_2_detail[ 'deadweight' ]);
+                            $vessel1_gross_tonnage = floatval($vehicel_1_detail[ 'gross_tonnage' ]);
+                            $vessel2_gross_tonnage = floatval($vehicel_2_detail[ 'gross_tonnage' ]);
+
+                            $vessel1_length = $vehicel_1_detail[ 'length' ];
+                            $vessel2_length = $vehicel_2_detail[ 'length' ];
+
+                            $vessel1_length = $vehicel_1_detail[ 'length' ];
+                            $vessel2_length = $vehicel_2_detail[ 'length' ];
+
+                            $v1_current_draught = floatval( $vehicel_1[ 'current_draught' ]);
+                            $v2_current_draught = floatval( $vehicel_2[ 'current_draught' ]);
+                            $sql = "select max(id) as id from ".$table_name_sts;
+                            $result2 = $mysqli->query($sql);
+                            $pk_id = $result2->fetch_column();
+                            $ref_id = 'STS'.date('Ymd').str_pad( $pk_id, strlen( $pk_id ) + 4, '0', STR_PAD_LEFT);
                             
-    //                         $predicted_cargo_1 = $detectresult['vessel_1']['predicted_cargo'];
-    //                         $predicted_cargo_2 = $detectresult['vessel_2']['predicted_cargo'];
+                            $predicted_cargo_1 = $detectresult['vessel_1']['predicted_cargo'];
+                            $predicted_cargo_2 = $detectresult['vessel_2']['predicted_cargo'];
 
-    //                         $current_distance_nm        = $detectresult['proximity_analysis']['current_distance_nm'];
-    //                         $stationary_duration_hours  = $detectresult['proximity_analysis']['stationary_duration_hours'];
-    //                         $proximity_consistency      = $detectresult['proximity_analysis']['proximity_consistency'];
-    //                         $data_points_analyzed       = $detectresult['proximity_analysis']['data_points_analyzed'];
+                            $current_distance_nm        = $detectresult['proximity_analysis']['current_distance_nm'];
+                            $stationary_duration_hours  = $detectresult['proximity_analysis']['stationary_duration_hours'];
+                            $proximity_consistency      = $detectresult['proximity_analysis']['proximity_consistency'];
+                            $data_points_analyzed       = $detectresult['proximity_analysis']['data_points_analyzed'];
                             
-    //                         $risk_level     = $detectresult['risk_assessment']['risk_level'];
-    //                         $confidence     = $detectresult['risk_assessment']['confidence'];
-    //                         $remarks        = $detectresult['risk_assessment']['remarks'];
+                            $risk_level     = $detectresult['risk_assessment']['risk_level'];
+                            $confidence     = $detectresult['risk_assessment']['confidence'];
+                            $remarks        = $detectresult['risk_assessment']['remarks'];
                             
-    //                         $timestamp      = $detectresult['timestamp'];
+                            $timestamp      = $detectresult['timestamp'];
 
-    //                         $vessel_condition1 = $detectresult['vessel_1']['vessel_condition'];
+                            $vessel_condition1 = $detectresult['vessel_1']['vessel_condition'];
                             
-    //                         $vessel_condition2 = $detectresult['vessel_2']['vessel_condition'];
+                            $vessel_condition2 = $detectresult['vessel_2']['vessel_condition'];
                             
-    //                         $operation_mode = $detectresult['operation_mode']; 
-    //                         $status = $detectresult['status']; 
-    //                         if( empty( $status ) ) {
-    //                             $status = 'Detected';
-    //                         }
+                            $operation_mode = $detectresult['operation_mode']; 
+                            $status = $detectresult['status']; 
+                            if( empty( $status ) ) {
+                                $status = 'Detected';
+                            }
 
-    //                         $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id,remarks,event_percentage, cargo_category_type, risk_level, vessel_condition1,vessel_condition2, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared,vessel1_signal, vessel2_signal, zone_type, zone_ship, mother_vessel_number )
-    //                                 VALUES (
-    //                                     '" . $mysqli->real_escape_string($v1['uuid']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['name']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['mmsi']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['imo']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['country_iso']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['type']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['type_specific']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['lat']) . "',
-    //                                     '" . $mysqli->real_escape_string($v1['lon']) . "',
-    //                                     '" . floatval($v1['speed']) . "',
-    //                                     '" . $v1_navigation_status . "',
-    //                                     '" . $v1_current_draught . "',
-    //                                     '" . date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['uuid']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['name']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['mmsi']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['imo']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['country_iso']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['type']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['type_specific']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['lat']) . "',
-    //                                     '" . $mysqli->real_escape_string($v2['lon']) . "',
-    //                                     '" . floatval($v2['speed']) . "',
-    //                                     '" . $v2_navigation_status . "',
-    //                                     '" . $v2_current_draught . "',
-    //                                     '" . date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) . "',
-    //                                     '" . floatval($dist) . "',
-    //                                     '" . $mysqli->real_escape_string( $port_name ) . "',
-    //                                     '" . $mysqli->real_escape_string( $port_id ) . "',
-    //                                     '".$last_updated."', NOW(), '".$ref_id."',
-    //                                     '".$remarks."', 
-    //                                     '".floatval( $confidence )."', 
-    //                                     '".$predicted_cargo_1."', 
-    //                                     '".$risk_level."',
-    //                                     '".$vessel_condition1."',
-    //                                     '".$vessel_condition2."',
-    //                                     '".$new_zone_terminal_name."',
-    //                                     '".$operation_mode."',
-    //                                     '".$status."',
-    //                                     '".$current_distance_nm."',
-    //                                     '".$stationary_duration_hours."',
-    //                                     '".$proximity_consistency."',
-    //                                     '".$data_points_analyzed."',
-    //                                     'No', 'AIS Consistent', 'AIS Consistent', '".$zone_type."', '".$zone_ship."', '$mother_vessel_number'
-    //                                     )";
+                            echo $sql = "INSERT INTO $table_name_sts (vessel1_uuid , vessel1_name, vessel1_mmsi, vessel1_imo, vessel1_country_iso, vessel1_type, vessel1_type_specific, vessel1_lat, vessel1_lon,vessel1_speed,vessel1_navigation_status, vessel1_draught, vessel1_last_position_UTC, vessel2_uuid , vessel2_name, vessel2_mmsi, vessel2_imo, vessel2_country_iso, vessel2_type, vessel2_type_specific, vessel2_lat, vessel2_lon,vessel2_speed,vessel2_navigation_status,vessel2_draught,vessel2_last_position_UTC, distance, port, port_id, last_updated, start_date, event_ref_id,remarks,event_percentage, cargo_category_type, risk_level, zone_terminal_name, operationmode, status, current_distance_nm, stationary_duration_hours, proximity_consistency, data_points_analyzed, is_disappeared,vessel1_signal, vessel2_signal, zone_type, zone_ship, mother_vessel_number, vessel1_deadweight, vessel2_deadweight, vessel1_gross_tonnage, vessel2_gross_tonnage )
+                                    VALUES (
+                                        '" . $mysqli->real_escape_string($v1['uuid']) . "',
+                                        '" . $mysqli->real_escape_string($v1['name']) . "',
+                                        '" . $mysqli->real_escape_string($v1['mmsi']) . "',
+                                        '" . $mysqli->real_escape_string($v1['imo']) . "',
+                                        '" . $mysqli->real_escape_string($v1['country_iso']) . "',
+                                        '" . $mysqli->real_escape_string($v1['type']) . "',
+                                        '" . $mysqli->real_escape_string($v1['type_specific']) . "',
+                                        '" . $mysqli->real_escape_string($v1['lat']) . "',
+                                        '" . $mysqli->real_escape_string($v1['lon']) . "',
+                                        '" . floatval($v1['speed']) . "',
+                                        '" . $v1_navigation_status . "',
+                                        '" . $v1_current_draught . "',
+                                        '" . date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) . "',
+                                        '" . $mysqli->real_escape_string($v2['uuid']) . "',
+                                        '" . $mysqli->real_escape_string($v2['name']) . "',
+                                        '" . $mysqli->real_escape_string($v2['mmsi']) . "',
+                                        '" . $mysqli->real_escape_string($v2['imo']) . "',
+                                        '" . $mysqli->real_escape_string($v2['country_iso']) . "',
+                                        '" . $mysqli->real_escape_string($v2['type']) . "',
+                                        '" . $mysqli->real_escape_string($v2['type_specific']) . "',
+                                        '" . $mysqli->real_escape_string($v2['lat']) . "',
+                                        '" . $mysqli->real_escape_string($v2['lon']) . "',
+                                        '" . floatval($v2['speed']) . "',
+                                        '" . $v2_navigation_status . "',
+                                        '" . $v2_current_draught . "',
+                                        '" . date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) . "',
+                                        '" . floatval($dist) . "',
+                                        '" . $mysqli->real_escape_string( $port_name ) . "',
+                                        '" . $mysqli->real_escape_string( $port_id ) . "',
+                                        '".$last_updated."', NOW(), '".$ref_id."',
+                                        '".$remarks."', 
+                                        '".floatval( $confidence )."', 
+                                        '".$predicted_cargo_1."', 
+                                        '".$risk_level."',
+                                        '".$new_zone_terminal_name."',
+                                        '".$operation_mode."',
+                                        '".$status."',
+                                        '".$current_distance_nm."',
+                                        '".$stationary_duration_hours."',
+                                        '".$proximity_consistency."',
+                                        '".$data_points_analyzed."',
+                                        'No', 'AIS Consistent', 'AIS Consistent', '".$zone_type."', '".$zone_ship."', '$mother_vessel_number', '$vessel1_deadweight', '$vessel2_deadweight', '$vessel1_gross_tonnage', '$vessel2_gross_tonnage'
+                                        )";
                         
-    //                         if ($mysqli->query( $sql ) !== TRUE) {
-    //                             echo "Error: " . $sql . "<br>" . $mysqli->error;
-    //                         } else {
-    //                             $test_fetch++;
-    //                             $insert_id = $array_ids[] = $mysqli->insert_id;
-    //                             $array_uidds[] = [ $v1['uuid'], $v2['uuid'] ];
-    //                             coastalynk_log_entry($insert_id, 'STS Between '.$v1['name'].' and '.$v2['name'].': '.$remarks, $type='sts');
+                            if ($mysqli->query( $sql ) !== TRUE) {
+                                echo "Error: " . $sql . "<br>" . $mysqli->error;
+                            } else {
+                                $test_fetch++;
+                                $insert_id = $array_ids[] = $mysqli->insert_id;
+                                $array_uidds[] = [ $v1['uuid'], $v2['uuid'] ];
+                                coastalynk_log_entry($insert_id, 'STS Between '.$v1['name'].' and '.$v2['name'].': '.$remarks, $type='sts');
 
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_body_original );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_mmsi]", $v1['mmsi'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_imo]", $v1['imo'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_country_iso]", $v1['country_iso'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_type]", $v1['type'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_type_specific]", $v1['type_specific'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_lat]", $v1['lat'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_lon]", $v1['lon'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_speed]", $v1['speed'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_navigation_status]", $v1_navigation_status, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_draught]", $v1_current_draught, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[sts-page-url]", $siteurl.'/sts-map/', $coastalynk_sts_body );            
-    //                             $coastalynk_sts_body = str_replace( "[vessel1_last_position_UTC]", $v1['last_position_UTC'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_uuid]", $v2['uuid'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_name]", $v2['name'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_mmsi]", $v2['mmsi'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_imo]", $v2['imo'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_country_iso]", $v2['country_iso'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_type]", $v2['type'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_type_specific]", $v2['type_specific'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_lat]", $v2['lat'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_lon]", $v2['lon'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_speed]", $v2['speed'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_navigation_status]", $v2_navigation_status, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_draught]", $v2_current_draught, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_country_flag]", $siteurl.'/flags/'.strtolower($v2['country_iso']).'.jpg', $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[vessel2_last_position_UTC]", $v2['last_position_UTC'], $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[distance]", $dist, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[port]", $port_name, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[port_id]", $port_id, $coastalynk_sts_body );
-    //                             $coastalynk_sts_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sts_body ); 
+                                // $coastalynk_sts_body = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_body_original );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_mmsi]", $v1['mmsi'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_imo]", $v1['imo'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_country_iso]", $v1['country_iso'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_type]", $v1['type'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_type_specific]", $v1['type_specific'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_lat]", $v1['lat'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_lon]", $v1['lon'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_speed]", $v1['speed'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_navigation_status]", $v1_navigation_status, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_draught]", $v1_current_draught, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel1_country_flag]", $siteurl.'/flags/'.strtolower($v1['country_iso']).'.jpg', $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[sts-page-url]", $siteurl.'/sts-map/', $coastalynk_sts_body );            
+                                // $coastalynk_sts_body = str_replace( "[vessel1_last_position_UTC]", $v1['last_position_UTC'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_uuid]", $v2['uuid'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_name]", $v2['name'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_mmsi]", $v2['mmsi'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_imo]", $v2['imo'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_country_iso]", $v2['country_iso'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_type]", $v2['type'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_type_specific]", $v2['type_specific'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_lat]", $v2['lat'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_lon]", $v2['lon'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_speed]", $v2['speed'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_navigation_status]", $v2_navigation_status, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_draught]", $v2_current_draught, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_country_flag]", $siteurl.'/flags/'.strtolower($v2['country_iso']).'.jpg', $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[vessel2_last_position_UTC]", $v2['last_position_UTC'], $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[distance]", $dist, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[port]", $port_name, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[port_id]", $port_id, $coastalynk_sts_body );
+                                // $coastalynk_sts_body = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sts_body ); 
 
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_email_subject_original );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_mmsi]", $v1['mmsi'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_imo]", $v1['imo'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_country_iso]", $v1['country_iso'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_type]", $v1['type'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_type_specific]", $v1['type_specific'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_lat]", $v1['lat'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_lon]", $v1['lon'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_speed]", $v1['speed'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_navigation_status]", $v1_navigation_status, $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_draught]", $v1_current_draught, $coastalynk_sts_email_subject );                   
-    //                             $coastalynk_sts_email_subject = str_replace( "[sts-page-url]", $siteurl.'sts-map/', $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_draught]", $v2_current_draught, $coastalynk_sts_email_subject );            
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel1_last_position_UTC]", $v1['last_position_UTC'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_uuid]", $v2['uuid'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_name]", $v2['name'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_mmsi]", $v2['mmsi'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_imo]", $v2['imo'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_country_iso]", $v2['country_iso'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_type]", $v2['type'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_type_specific]", $v2['type_specific'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_lat]", $v2['lat'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_lon]", $v2['lon'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_speed]", $v2['speed'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_navigation_status]", $v2_navigation_status, $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[vessel2_last_position_UTC]", $v2['last_position_UTC'], $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[distance]", $dist, $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[port]", $port_name, $coastalynk_sts_email_subject );
-    //                             $coastalynk_sts_email_subject = str_replace( "[port_id]", $port_id, $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_uuid]", $v1['uuid'], $coastalynk_sts_email_subject_original );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_name]", $v1['name'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_mmsi]", $v1['mmsi'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_imo]", $v1['imo'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_country_iso]", $v1['country_iso'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_type]", $v1['type'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_type_specific]", $v1['type_specific'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_lat]", $v1['lat'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_lon]", $v1['lon'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_speed]", $v1['speed'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_navigation_status]", $v1_navigation_status, $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_draught]", $v1_current_draught, $coastalynk_sts_email_subject );                   
+                                // $coastalynk_sts_email_subject = str_replace( "[sts-page-url]", $siteurl.'sts-map/', $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_draught]", $v2_current_draught, $coastalynk_sts_email_subject );            
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel1_last_position_UTC]", $v1['last_position_UTC'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_uuid]", $v2['uuid'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_name]", $v2['name'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_mmsi]", $v2['mmsi'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_imo]", $v2['imo'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_country_iso]", $v2['country_iso'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_type]", $v2['type'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_type_specific]", $v2['type_specific'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_lat]", $v2['lat'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_lon]", $v2['lon'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_speed]", $v2['speed'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_navigation_status]", $v2_navigation_status, $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[vessel2_last_position_UTC]", $v2['last_position_UTC'], $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[distance]", $dist, $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[port]", $port_name, $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[port_id]", $port_id, $coastalynk_sts_email_subject );
 
-    //                             $coastalynk_sts_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sts_email_subject );
+                                // $coastalynk_sts_email_subject = str_replace( "[last_updated]", date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])), $coastalynk_sts_email_subject );
 
-    //                             $mail = new PHPMailer(true);
-    //                             try {
-    //                                 // Server settings
-    //                                 $mail->isSMTP();
-    //                                 $mail->Host       = 'smtp.gmail.com';
-    //                                 $mail->SMTPAuth   = true;
-    //                                 $mail->Username   = smtp_user_name; // Your Gmail address
-    //                                 $mail->Password   = smtp_password; // Generated App Password
-    //                                 $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Use TLS encryption
-    //                                 $mail->Port       = 587; // TCP port for TLS
+                                // $mail = new PHPMailer(true);
+                                // try {
+                                //     // Server settings
+                                //     $mail->isSMTP();
+                                //     $mail->Host       = 'smtp.gmail.com';
+                                //     $mail->SMTPAuth   = true;
+                                //     $mail->Username   = smtp_user_name; // Your Gmail address
+                                //     $mail->Password   = smtp_password; // Generated App Password
+                                //     $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Use TLS encryption
+                                //     $mail->Port       = 587; // TCP port for TLS
 
-    //                                 // Recipients
-    //                                 $mail->setFrom('coastalynk@gmail.com', 'CoastaLynk');
-    //                                 $mail->addAddress( $coatalynk_site_admin_email, 'CoastaLynk' );
-    //                                 $mail->addAddress( $coatalynk_npa_admin_email, 'NPA' );
-    //                                 $mail->addAddress( $coatalynk_finance_admin_email, 'Finance Department' );
-    //                                 $mail->addAddress( $coatalynk_nimasa_admin_email, 'NIMASA' );
+                                //     // Recipients
+                                //     $mail->setFrom('coastalynk@gmail.com', 'CoastaLynk');
+                                //     $mail->addAddress( $coatalynk_site_admin_email, 'CoastaLynk' );
+                                //     $mail->addAddress( $coatalynk_npa_admin_email, 'NPA' );
+                                //     $mail->addAddress( $coatalynk_finance_admin_email, 'Finance Department' );
+                                //     $mail->addAddress( $coatalynk_nimasa_admin_email, 'NIMASA' );
 
-    //                                 // Content
-    //                                 $mail->isHTML(true); // Set email format to HTML
-    //                                 $mail->Subject = $coastalynk_sts_email_subject;
-    //                                 $mail->Body    = $coastalynk_sts_body;
-    //                                 $mail->AltBody = strip_tags($coastalynk_sts_body);
+                                //     // Content
+                                //     $mail->isHTML(true); // Set email format to HTML
+                                //     $mail->Subject = $coastalynk_sts_email_subject;
+                                //     $mail->Body    = $coastalynk_sts_body;
+                                //     $mail->AltBody = strip_tags($coastalynk_sts_body);
 
-    //                                 $mail->send();
+                                //     $mail->send();
 
-    //                                 $sql = "update ".$table_name_sts." set is_email_sent='Yes' where id='".$insert_id."'";
-    //                                 $mysqli->query($sql);
-    //                                 coastalynk_log_entry($insert_id, 'STS Between '.$v1['name'].' and '.$v2['name'].': Email sent successfully!', 'sts');
+                                //     $sql = "update ".$table_name_sts." set is_email_sent='Yes' where id='".$insert_id."'";
+                                //     $mysqli->query($sql);
+                                //     coastalynk_log_entry($insert_id, 'STS Between '.$v1['name'].' and '.$v2['name'].': Email sent successfully!', 'sts');
 
-    //                                 echo 'Email sent successfully!';
-    //                             } catch (Exception $e) {
-    //                                 echo "Email could not be sent. Error: {$mail->ErrorInfo}";
-    //                             }
-    //                         }
-    //                     } else {
-    //                         $row = mysqli_fetch_assoc($result2);
-    //                         $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
-    //                         $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
+                                //     echo 'Email sent successfully!';
+                                // } catch (Exception $e) {
+                                //     echo "Email could not be sent. Error: {$mail->ErrorInfo}";
+                                // }
+                            }
+                        } else {
+                            $row = mysqli_fetch_assoc($result2);
+                            $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
+                            $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
 
-    //                         $sql = "update ".$table_name_sts." set vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."' where id='".$row['id']."'";
-    //                         $mysqli->query($sql);
+                            $sql = "update ".$table_name_sts." set vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."' where id='".$row['id']."'";
+                            $mysqli->query($sql);
                             
-    //                         $array_ids[] = $row['id'];
-    //                         $array_uidds[] = [ $row['vessel1_uuid'], $row['vessel2_uuid'] ];
-    //                     }
+                            $array_ids[] = $row['id'];
+                            $array_uidds[] = [ $row['vessel1_uuid'], $row['vessel2_uuid'] ];
+                        }
 
-    //                     $result2->free();
-    //                 }
-    //             }
-    //         }
-    //     }
+                        $result2->free();
+                    }
+                }
+            }
+        }
 
       
-    // }
+    }
 }
 
-$sql = "select id, vessel1_uuid, vessel2_uuid, end_date, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught, vessel1_completed_draught, vessel2_completed_draught from ".$table_name_sts." where is_disappeared = 'No' and port='".$port_name."' and is_complete = 'Yes';";
+$sql = "select id, vessel1_deadweight, vessel2_deadweight, vessel1_uuid, zone_terminal_name, vessel1_name, vessel2_name,vessel2_deadweight ,vessel1_deadweight, vessel1_mmsi, vessel2_mmsi, vessel2_uuid, end_date, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught, vessel1_completed_draught, vessel2_completed_draught from ".$table_name_sts." where is_disappeared = 'No' and port='".$port_name."' and is_complete = 'Yes';";
 $result3 = $mysqli->query( $sql );
 $num_rows = mysqli_num_rows( $result3 );
 if( $num_rows > 0 ) {
@@ -606,11 +618,35 @@ if( $num_rows > 0 ) {
         $log = '';
         $v1 = get_datalastic_field( $row['vessel1_uuid'], '', true );
         $v2 = get_datalastic_field( $row['vessel2_uuid'], '', true );
+
+        echo '<pre>';
         $vessel1_signal = coastalynk_signal_status( $row[ 'vessel1_last_position_UTC' ], date( 'Y-m-d H:i:s', strtotime( $v1[ 'last_position_UTC' ] ) ) );
         $vessel2_signal = coastalynk_signal_status( $row[ 'vessel2_last_position_UTC' ], date( 'Y-m-d H:i:s', strtotime( $v2[ 'last_position_UTC' ] ) ) );
         $v1_current_draught = $v1['current_draught'];
         $v2_current_draught = $v2['current_draught'];
+        $calculator = new NigerianPortsAfterDraught(true);
+            
+        echo "<pre>=== NPA AFTER-DRAUGHT LOGIC SYSTEM - COMPLETE DEMO ===\n\n";
+        $tanker_by_type = $calculator->getTankerTypeByDWT($row['vessel1_deadweight']);
+        
+        $vessel_1 = [
+            'previous_draught' => $row['vessel1_draught'],
+            'current_draught' => $v1_current_draught,
+            'zone' => $row['zone_terminal_name'],
+            'tanker_type' => $tanker_by_type['primary_type']['type'],
+            'product_type' => $vessel_product_type[$tanker_by_type['primary_type']['type']]??'Crude Light',
+            'timestamp' => date('Y-m-d H:i:s'),
+            'ais_source' => $vessel1_signal,
+            'mmsi' => $row['vessel1_mmsi']
+        ];
 
+        $result1 = $calculator->calculateAfterDraught($vessel_1);
+        $v1_current_draught = $result1['after_draught'];
+        $draught_1_diff = $result1['draught_change'];
+        print_r($result1);
+        echo "\n";
+echo 'cond 2';
+        exit();
         $estimated_cargo = 0;
         $draught_1_diff = ( floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] ) );
         $draught_2_diff = ( floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] ) );
@@ -618,7 +654,8 @@ if( $num_rows > 0 ) {
         $log .= ', Vessel 2 Draught Difference: '.$draught_2_diff;
         $log .= ', Vessel 1 Signal: '.$vessel1_signal;
         $log .= ', Vessel 2 Signal: '.$vessel2_signal;
-        
+        $log .= ', Event Desc: '.$event_desc;
+
         $mother_vessel_number = '';
         if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
             $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] ) ) / 1000;
@@ -642,31 +679,7 @@ if( $num_rows > 0 ) {
         }
 
         $total_hours = $interval->days * 24 + $interval->h + ($interval->i / 60) + ($interval->s / 3600);
-        
-        // if( $draught_1_diff >= 0.3 ) {
-        //     $mother_vessel_number = " mother_vessel_number = '2',";
-        // } else if( $draught_2_diff >= 0.3 ) {
-        //     $mother_vessel_number = " mother_vessel_number = '1',";
-        // }
-        
-        // if( $total_hours <= 8 ) {
-        //     $status = 'Completed';
-        //     if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
-        //         $status = 'No Change';
-        //     } else {
-        //         if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
-        //             $status = 'Inconclusive';
-        //         } else {
-        //             $updatable_fields .= " is_disappeared = 'Yes', ";
-        //         }
-        //     }
 
-        //     $log .= ', Status: '.$status;
-        //     $sql = "update ".$table_name_sts." set ".$mother_vessel_number.$updatable_fields." status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['id']."'";
-        //     $mysqli->query($sql);
-
-        //     coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 8hrs: '.$log, 'sts');
-        // } else 
         if( $total_hours <= 9 && $total_hours >= 6  ) {
 
             $status = 'Completed';
@@ -675,10 +688,7 @@ if( $num_rows > 0 ) {
             } else {
                 if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
                     $status = 'Inconclusive';
-                } 
-                // else {
-                //     //$updatable_fields .= " is_disappeared = 'Yes', ";
-                // }
+                }
             }
 
             $log .= ', Status:'.$status;
@@ -717,7 +727,7 @@ if( count( $array_ids ) > 0 ) {
     $array_ids_implode = implode( ',', array_unique($array_ids) );
     
     
-    echo $sql = "select id, vessel1_uuid,vessel1_name,vessel1_mmsi,vessel2_name,vessel2_mmsi, vessel2_uuid, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught from ".$table_name_sts." where is_complete='No' and port='".$port_name."' and id not in (".$array_ids_implode.")";
+    $sql = "select id, vessel1_deadweight, vessel2_deadweight, port, zone_type, zone_ship, zone_terminal_name, vessel1_uuid,vessel1_name,vessel1_mmsi,vessel2_name,vessel2_mmsi, vessel2_uuid, vessel1_draught, vessel1_last_position_UTC, vessel2_last_position_UTC, vessel2_draught from ".$table_name_sts." where is_complete='No' and port='".$port_name."' and id not in (".$array_ids_implode.")";
     $result4 = $mysqli->query( $sql );
     $num_rows = mysqli_num_rows( $result4 );
     if( $num_rows > 0 ) {
@@ -726,11 +736,8 @@ if( count( $array_ids ) > 0 ) {
             $estimated_cargo = 0;
 
             $v1 = get_datalastic_field( $row['vessel1_uuid'], '', true );
-            $v1_detail = search_vessel_by_name( $row['vessel1_name'], $row['vessel1_mmsi'] );
-
             $v2 = get_datalastic_field( $row['vessel2_uuid'], '', true );
-            $v2_detail = search_vessel_by_name( $row['vessel2_name'], $row['vessel2_mmsi'] );
-
+            
             $v1_current_draught = $v1['current_draught'];
             $v2_current_draught = $v2['current_draught'];
 
@@ -741,75 +748,65 @@ if( count( $array_ids ) > 0 ) {
             $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
 
             $calculator = new NigerianPortsAfterDraught(true);
-    echo "<pre>=== NPA AFTER-DRAUGHT LOGIC SYSTEM - COMPLETE DEMO ===\n\n";
-            $tanker_by_type = $calculator->getTankerTypeByDWT($v1_detail['deadweight']);
-            print_r($tanker_by_type);
-
             
-
-            // Display tanker summary
-            //$calculator->displayTankerSummary();
-
-            echo "\n=== AFTER-DRAUGHT CALCULATIONS ===\n\n";
-
-            // Example 1: VLCC loading at Bonny Access (Ballast → Laden)
-            $example1 = [
+            echo "<pre>=== NPA AFTER-DRAUGHT LOGIC SYSTEM - COMPLETE DEMO ===\n\n";
+            $tanker_by_type = $calculator->getTankerTypeByDWT($row['vessel1_deadweight']);
+            
+            $vessel_1 = [
                 'previous_draught' => $row['vessel1_draught'],
                 'current_draught' => $v1_current_draught,
-                'zone' => 'Bonny Access',
+                'zone' => $row['zone_terminal_name'],
                 'tanker_type' => $tanker_by_type['primary_type']['type'],
-                'product_type' => 'Crude Light',
+                'product_type' => $vessel_product_type[$tanker_by_type['primary_type']['type']]??'Crude Light',
                 'timestamp' => date('Y-m-d H:i:s'),
                 'ais_source' => $vessel1_signal,
                 'mmsi' => $row['vessel1_mmsi']
             ];
 
-            echo "Example 1: VLCC Loading at Bonny Access\n";
-            $result1 = $calculator->calculateAfterDraught($example1);
+            $result1 = $calculator->calculateAfterDraught($vessel_1);
+            $v1_current_draught = $result1['after_draught'];
+            $draught_1_diff = $result1['draught_change'];
             print_r($result1);
             echo "\n";
             
-            $tanker_by_type2 = $calculator->getTankerTypeByDWT($v1_detail['deadweight']);
-            print_r($tanker_by_type2);
-            // Example 1: VLCC loading at Bonny Access (Ballast → Laden)
-            $example2 = [
+            $tanker_by_type2 = $calculator->getTankerTypeByDWT($row['vessel2_deadweight']);
+            $vessel_2 = [
                 'previous_draught' => $row['vessel2_draught'],
                 'current_draught' => $v2_current_draught,
-                'zone' => 'Bonny Access',
+                'zone' => $row['zone_terminal_name'],
                 'tanker_type' => $tanker_by_type2['primary_type']['type'],
-                'product_type' => 'Crude Light',
+                'product_type' => $vessel_product_type[$tanker_by_type['primary_type']['type']]??'Crude Light',
                 'timestamp' => date('Y-m-d H:i:s'),
                 'ais_source' => $vessel2_signal,
                 'mmsi' => $row['vessel2_mmsi']
             ];
 
             echo "Example 1: VLCC Loading at Bonny Access\n";
-            $result1 = $calculator->calculateAfterDraught($example2);
-            print_r($result1);
-            echo '<pre>';print_r($v1); print_r($v1_detail);
+            $result2 = $calculator->calculateAfterDraught($vessel_2);
+            $v2_current_draught = $result2['after_draught'];
+            $draught_2_diff = $result2['draught_change'];
+            print_r($result2);
 
-            
-
-            
-    echo '<hr>';
-    echo '<pre>';print_r($v2); print_r($v2_detail); 
-    exit;
-
-            
-            
-            
-            
+            $current_status = '';
+            $event_desc = '';
             if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
-                $estimated_cargo = (floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
+                $event_desc = $result1['event_description'];
+                $current_status = $result1['current_status'];
+                $estimated_cargo = $result1['cargo_mt']; //(floatval( $v1_current_draught ) - floatval( $row['vessel1_draught'] )) / 1000;
             } else if( $draught_2_diff >= 0.3 || $draught_2_diff <= -0.3 ) {
-                $estimated_cargo = (floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
+                $event_desc = $result2['event_description'];
+                $current_status = $result2['current_status'];
+                $estimated_cargo = $result2['cargo_mt']; //(floatval( $v2_current_draught ) - floatval( $row['vessel2_draught'] )) / 1000;
             }
             
             $mother_vessel_number = '';
+            $draught_diff = 0;
             if( $draught_1_diff >= 0.3 && $draught_1_diff <= -0.3 ) {
                 $mother_vessel_number = " mother_vessel_number = '1',";
+                $draught_diff = $draught_1_diff;
             } else if( $draught_2_diff >= 0.3 && $draught_2_diff <= -0.3 ) {
                 $mother_vessel_number = " mother_vessel_number = '2',";
+                $draught_diff = $draught_2_diff;
             }
             $status = 'Completed';
             if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
@@ -825,8 +822,9 @@ if( count( $array_ids ) > 0 ) {
             $log .= ', Vessel 2 Draught Difference: '.$draught_2_diff;
             $log .= ', Vessel 1 Signal: '.$vessel1_signal;
             $log .= ', Vessel 2 Signal: '.$vessel2_signal;
-            
-            $sql = "update ".$table_name_sts." set ".$mother_vessel_number."is_complete = 'Yes', status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
+            $log .= ', Event Desc: '.$event_desc;
+
+            $sql = "update ".$table_name_sts." set ".$mother_vessel_number."draught_change = '".$draught_diff."',operationmode = '".$current_status."',event_desc = '".$event_desc."',is_complete = 'Yes', status = '".$status."',vessel1_signal = '".$vessel1_signal."', vessel2_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', vessel1_completed_draught = '".floatval( $v1_current_draught )."', vessel2_completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
             $mysqli->query($sql);
 
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after vessels leave the area: '.$log, 'sts');

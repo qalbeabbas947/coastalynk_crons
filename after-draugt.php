@@ -5,7 +5,21 @@ class NigerianPortsAfterDraught {
     // Coastalynk After-Draught Dataset v1.0 - Zone Data
 
     private $zoneData = [
+        '' => [
+            'permissible_draught' => '',
+            'ballast_range' => [],
+            'intermediate_range' => [],
+            'laden_range' => [],
+            'change_threshold' => 2.5
+        ],
         'BONNY' => [
+            'permissible_draught' => 13.3,
+            'ballast_range' => [6.0, 8.0],
+            'intermediate_range' => [8.0, 11.0],
+            'laden_range' => [11.0, 13.3],
+            'change_threshold' => 2.5
+        ],
+        'bonny_pba' => [
             'permissible_draught' => 13.3,
             'ballast_range' => [6.0, 8.0],
             'intermediate_range' => [8.0, 11.0],
@@ -41,6 +55,13 @@ class NigerianPortsAfterDraught {
             'change_threshold' => 1.5
         ],
         'Lagos Offshore Zone' => [
+            'permissible_draught' => 14.5,
+            'ballast_range' => [6.5, 9.0],
+            'intermediate_range' => [9.0, 12.0],
+            'laden_range' => [12.0, 14.5],
+            'change_threshold' => 3.0
+        ],
+        'lagos PBA' => [
             'permissible_draught' => 14.5,
             'ballast_range' => [6.5, 9.0],
             'intermediate_range' => [9.0, 12.0],
@@ -88,7 +109,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 7.0,
             'max_draught_change' => 2.5,
             'displacement_mt_m' => 8000,
-            'common_ports' => ['Apapa Circle', 'TinCan Circle', 'Atlas Cove']
+            'common_ports' => ['Apapa Circle', 'TinCan Circle', 'Lagos Offshore Zone']
         ],
         
         'LR1' => [
@@ -101,7 +122,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 8.0,
             'max_draught_change' => 3.0,
             'displacement_mt_m' => 12000,
-            'common_ports' => ['Bonny Access', 'Atlas Cove', 'Lagos Fairway']
+            'common_ports' => ['BONNY', 'Lagos Offshore Zone', 'LAGOS']
         ],
         
         'LR2' => [
@@ -114,7 +135,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 9.5,
             'max_draught_change' => 3.5,
             'displacement_mt_m' => 16000,
-            'common_ports' => ['Bonny Access', 'Lagos Fairway']
+            'common_ports' => ['BONNY', 'LAGOS']
         ],
         
         'Aframax' => [
@@ -127,7 +148,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 9.0,
             'max_draught_change' => 3.0,
             'displacement_mt_m' => 18000,
-            'common_ports' => ['Bonny Access', 'Lagos Fairway'],
+            'common_ports' => ['BONNY', 'LAGOS'],
             'description' => 'Standard tanker for crude oil transportation, named after AFRA (Average Freight Rate Assessment)'
         ],
         
@@ -141,7 +162,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 10.0,
             'max_draught_change' => 4.0,
             'displacement_mt_m' => 22000,
-            'common_ports' => ['Bonny Access'],
+            'common_ports' => ['BONNY'],
             'description' => 'Largest tanker that can transit the Suez Canal fully loaded'
         ],
         
@@ -155,7 +176,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 12.0,
             'max_draught_change' => 5.0,
             'displacement_mt_m' => 30000,
-            'common_ports' => ['Bonny Access'],
+            'common_ports' => ['BONNY'],
             'description' => 'Ultra-large tankers for long-haul crude transportation'
         ],
         'ULCC' => [
@@ -168,7 +189,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 12.0,
             'max_draught_change' => 5.0,
             'displacement_mt_m' => 30000,
-            'common_ports' => ['Bonny Access'],
+            'common_ports' => ['BONNY'],
             'description' => 'Ultra Large Crude Carrier'
         ],
         'Chemical' => [
@@ -184,7 +205,6 @@ class NigerianPortsAfterDraught {
             'common_ports' => ['Apapa Circle', 'TinCan Circle', 'Onne-FOT'],
             'description' => 'Specialized tankers with coated tanks for chemical transportation'
         ],
-        
         'LPG' => [
             'name' => 'Liquefied Petroleum Gas Carrier',
             'min' => 10000,
@@ -195,7 +215,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 6.0,
             'max_draught_change' => 1.0,
             'displacement_mt_m' => 2500,
-            'common_ports' => ['Atlas Cove', 'Lagos Fairway'],
+            'common_ports' => ['Lagos Offshore Zone', 'LAGOS'],
             'description' => 'Pressurized or refrigerated carriers for LPG transportation'
         ],
         
@@ -209,7 +229,7 @@ class NigerianPortsAfterDraught {
             'ballast_draught' => 9.0,
             'max_draught_change' => 1.0,
             'displacement_mt_m' => 3500,
-            'common_ports' => ['Bonny Access', 'Lagos Fairway'],
+            'common_ports' => ['BONNY', 'LAGOS'],
             'description' => 'Advanced cryogenic tankers for LNG transportation at -162°C'
         ]
     ];
@@ -334,7 +354,11 @@ class NigerianPortsAfterDraught {
         $absChange = abs($draughtChange);
 
         // Step 3: Identify vessel status using draught difference
-        $zoneThreshold = $this->zoneData[$zone]['change_threshold'];
+        $zoneThreshold = 2.5;
+        if( isset( $this->zoneData[$zone] ) ) {
+            $zoneThreshold = $this->zoneData[$zone]['change_threshold'];
+        }
+        
         
         $previousStatus = $this->determineVesselStatus($previousDraught, $zone);
         $currentStatus = $this->determineVesselStatus($currentDraught, $zone);
@@ -344,7 +368,7 @@ class NigerianPortsAfterDraught {
             return $this->createResult(
                 $vesselData,
                 $draughtChange,
-                'No significant change',
+                'No Change',
                 'Small fluctuation below noise floor',
                 0,
                 0.1
@@ -376,7 +400,7 @@ class NigerianPortsAfterDraught {
 
         // Step 7: Calculate cargo estimation if applicable
         $cargoMT = 0;
-        if ($afterDraughtEvent['status'] !== 'No significant change') {
+        if ($afterDraughtEvent['status'] !== 'No Change') {
             $cargoMT = $this->calculateCargoMT(
                 $draughtChange,
                 $tankerType,
@@ -398,13 +422,18 @@ class NigerianPortsAfterDraught {
     }
 
     private function determineVesselStatus($draught, $zone) {
+        
+        if( !isset( $this->zoneData[$zone] ) ) {
+            return 'Intermediate';
+        }
+
         $zoneInfo = $this->zoneData[$zone];
         
-        if ($draught <= $zoneInfo['ballast_range'][1]) {
+        if ( !empty( $zoneInfo['ballast_range'] ) && $draught <= $zoneInfo['ballast_range'][1]) {
             return 'Ballast';
-        } elseif ($draught > $zoneInfo['intermediate_range'][0] && $draught < $zoneInfo['intermediate_range'][1] ) {
+        } elseif ( !empty( $zoneInfo['intermediate_range'] ) && $draught > $zoneInfo['intermediate_range'][0] && $draught < $zoneInfo['intermediate_range'][1] ) {
             return 'Intermediate';
-        } elseif ($draught >= $zoneInfo['laden_range'][0]) {
+        } elseif ( !empty( $zoneInfo['laden_range'] ) && $draught >= $zoneInfo['laden_range'][0]) {
             return 'Laden';
         } else {
             return 'Intermediate';
@@ -417,7 +446,7 @@ class NigerianPortsAfterDraught {
         // Check if change meets threshold for significant event
         if ($absChange < $zoneThreshold) {
             return [
-                'status' => 'No significant change',
+                'status' => 'No Change',
                 'description' => "Draught change {$absChange}m below zone threshold {$zoneThreshold}m",
                 'confidence' => 0.3
             ];
@@ -478,6 +507,11 @@ class NigerianPortsAfterDraught {
     }
 
     private function checkPermissibleDraught($draught, $zone) {
+
+        if( !isset( $this->zoneData[$zone] ) ) {
+            return true;
+        }
+
         $maxPermissible = $this->zoneData[$zone]['permissible_draught'];
         
         if ($draught > $maxPermissible) {
@@ -496,9 +530,9 @@ class NigerianPortsAfterDraught {
             }
         }
 
-        if (!isset($this->zoneData[$vesselData['zone']])) {
-            return "Invalid zone: {$vesselData['zone']}";
-        }
+        // if (!isset($this->zoneData[$vesselData['zone']])) {
+        //     return "Invalid zone: {$vesselData['zone']}";
+        // }
 
         if (!isset($this->tankerSpecs[$vesselData['tanker_type']])) {
             return "Invalid tanker type: {$vesselData['tanker_type']}";
@@ -512,6 +546,16 @@ class NigerianPortsAfterDraught {
     }
 
     private function createResult($vesselData, $draughtChange, $status, $description, $cargoMT, $confidence, $previousStatus = null, $currentStatus = null) {
+        if( !isset( $this->zoneData[$vesselData['zone']] ) ) {
+            $this->zoneData[$vesselData['zone']] = [
+                'permissible_draught' => '',
+                'ballast_range' => [],
+                'intermediate_range' => [],
+                'laden_range' => [],
+                'change_threshold' => 2.5
+            ];
+        }
+
         $zoneInfo = $this->zoneData[$vesselData['zone']];
         $tankerInfo = $this->tankerSpecs[$vesselData['tanker_type']];
         
@@ -643,11 +687,11 @@ function demonstrateCompleteSystem() {
 
     echo "\n=== AFTER-DRAUGHT CALCULATIONS ===\n\n";
 
-    // Example 1: VLCC loading at Bonny Access (Ballast → Laden)
+    // Example 1: VLCC loading at BONNY (Ballast → Laden)
     $example1 = [
         'previous_draught' => 8.5,
         'current_draught' => 12.8,
-        'zone' => 'Bonny Access',
+        'zone' => 'BONNY',
         'tanker_type' => 'VLCC',
         'product_type' => 'Crude Light',
         'timestamp' => '2024-01-15 14:30:00',
@@ -655,7 +699,7 @@ function demonstrateCompleteSystem() {
         'mmsi' => '123456789'
     ];
 
-    echo "Example 1: VLCC Loading at Bonny Access\n";
+    echo "Example 1: VLCC Loading at BONNY\n";
     $result1 = $calculator->calculateAfterDraught($example1);
     print_r($result1);
     echo "\n";
@@ -684,14 +728,14 @@ function demonstrateCompleteSystem() {
     echo "\n";
 
     // Example 4: Location information
-    echo "Example 4: Bonny Access Location Details\n";
-    $bonnyInfo = $calculator->getZoneInfo('Bonny Access');
+    echo "Example 4: BONNY Location Details\n";
+    $bonnyInfo = $calculator->getZoneInfo('BONNY');
     print_r($bonnyInfo);
     echo "\n";
 
     // Example 5: Tanker suggestion
-    echo "Example 5: Tanker suggestion for Crude Light to Bonny Access\n";
-    $suggestedTankers = $calculator->suggestOptimalTanker('Crude Light', 100000, 'Bonny Access');
+    echo "Example 5: Tanker suggestion for Crude Light to BONNY\n";
+    $suggestedTankers = $calculator->suggestOptimalTanker('Crude Light', 100000, 'BONNY');
     foreach ($suggestedTankers as $type => $details) {
         echo " - $type: {$details['dwt_range']} ({$details['name']})\n";
     }

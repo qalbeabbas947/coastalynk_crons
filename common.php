@@ -14,6 +14,17 @@ define( 'smtp_password', 'tbbwozxclpncuukn' );
 
 $table_prefix = 'wp_';
 
+$vessel_product_type = [];
+$vessel_product_type['Chemical'] = 'PMS'; 
+$vessel_product_type['LPG'] = 'LPG';
+$vessel_product_type['LNG'] = 'LNG';
+$vessel_product_type['MR'] = 'Crude Light';
+$vessel_product_type['LR1'] = 'Crude Light';
+$vessel_product_type['LR2'] = 'Crude Light';
+$vessel_product_type['Aframax'] = 'Crude Light';
+$vessel_product_type['Suezmax'] = 'Crude Light';
+$vessel_product_type['VLCC'] = 'Crude Light';
+
 /**
  * Returns the value of wordpress options
  */
