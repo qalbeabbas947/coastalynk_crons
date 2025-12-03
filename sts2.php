@@ -117,7 +117,6 @@ function get_datalastic_field( $uuid, $field = 'navigation_status', $is_full = t
         return $data['data'][$field];
     }
 }
-
 $lat = $argv[1];
 $lon = $argv[2];
 
@@ -137,7 +136,7 @@ if( empty( $lat ) || empty( $lon ) ) {
     $param_lon = $mysqli->real_escape_string( floatval( $lon ) );
 }
 
-coastalynk_log_entry(0, 'Started the console cron with Latitude:'.$lat.' and Longitude:'.$lon.' for STS operatoin.', 'sts');
+coastalynk_log_entry(0, 'Started the cron with Latitude:'.$lat.' and Longitude:'.$lon.' for STS operatoin.', 'sts');
 $zone_terminal_name = '';
 $candidates = [];
 $last_updated = date('Y-m-d H:i:s');
