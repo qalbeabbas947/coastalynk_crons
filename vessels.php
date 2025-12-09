@@ -22,7 +22,7 @@ if ($mysqli->connect_error) {
 }
 
 $table_name = $table_prefix . 'coastalynk_ports';
-$sql = "select * from ".$table_name." where port_type='Port' order by title";
+$sql = "select * from ".$table_name." where country_iso='NG' and port_type='Port' order by title";
 $idx = 0;
 if ($result = $mysqli->query( $sql ) ) {
 
@@ -73,7 +73,7 @@ if ($result = $mysqli->query( $sql ) ) {
         if( ! empty($obj->lat) && !empty($obj->lon)) {
             echo '<br>'.($idx++).":".$obj->title;
 
-            $url = sprintf(
+            echo '<br>'.$url = sprintf(
                 "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%f",
                 urlencode($api_key),
                 $obj->lat,
