@@ -15,6 +15,8 @@ define( 'smtp_password', 'tbbwozxclpncuukn' );
 $table_prefix = 'wp_';
 
 $vessel_product_type = [];
+
+$vessel_product_type['Coastal'] = 'LPG'; 
 $vessel_product_type['Chemical'] = 'PMS'; 
 $vessel_product_type['LPG'] = 'LPG';
 $vessel_product_type['LNG'] = 'LNG';
@@ -43,6 +45,26 @@ function get_option_data( $option_name ) {
     }
     
     return $single_value;
+}
+
+/**
+ * Returns the value of wordpress options
+ */
+function total_sts_daughter_vessels( $event_id, $step_id = 0  ) {
+
+    global $mysqli, $table_prefix;
+
+    $event_table_daughter = $table_prefix . 'coastalynk_sts_event_detail';
+
+    $step_where = '';
+    if( $step_id > 0 ) {
+        $step_where = ' and step = '.$step_id;
+    }
+
+    $sql = "select id from ".$event_table_daughter." where event_id='".$event_id."' and is_complete = 'Yes'".$step_where;
+    $result5 = $mysqli->query( $sql );
+    
+    return  mysqli_num_rows( $result5 );
 }
 
 /**
