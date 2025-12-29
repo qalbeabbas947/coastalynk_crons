@@ -222,6 +222,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_mother."` (
   `zone_ship` varchar(255) DEFAULT '',
   `zone_terminal_name` varchar(255) DEFAULT '',
   `start_date` timestamp NULL DEFAULT NULL,
+   lock_time timestamp NULL DEFAULT NULL,
   `end_date` timestamp NULL DEFAULT NULL,
   `status` varchar(30) NOT NULL DEFAULT '',  
   `is_email_sent` enum('No','Yes') NOT NULL DEFAULT 'No',
@@ -256,6 +257,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_daughter."` (
   `gross_tonnage` float DEFAULT 0,
   `draught_change` float DEFAULT 0,
   `ais_signal` enum('','AIS Gap','AIS Consistent') DEFAULT NULL,
+  `joining_date` timestamp NULL DEFAULT NULL,
   `end_date` timestamp NULL DEFAULT NULL,
   `distance` float DEFAULT 0,
   `remarks` varchar(255) DEFAULT NULL,
@@ -315,12 +317,12 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                 $item_count_sub++;
                 if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker')) { // && $total_allowed < 1
                     
-                   // echo '\ndetecting:'.$v1['uuid'].' != '.$v2['uuid'].'     '.$item_count_main.'    '.$item_count_sub;;                    
+                   echo '\ndetecting:'.$v1['uuid'].' != '.$v2['uuid'].'     '.$item_count_main.'    '.$item_count_sub;;                    
                     $detectresult = $detector->detectSTSTransfer($v1, $v2);
                     
                     if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) {
                         
-                        $sql = "SELECT e.id, e.id as did, e.uuid as vessel1_uuid, d.uuid as vessel2_uuid, e.is_email_sent, e.draught as vessel1_draught, d.draught as vessel2_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, e.ais_signal as vessel1_signal, d.ais_signal as vessel2_signal from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where ( ( e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) or ( d.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' ) ) and e.is_disappeared = 'No'";
+                        $sql = "SELECT e.id, e.id as did, e.uuid as vessel1_uuid, d.uuid as vessel2_uuid, e.is_email_sent, e.draught as vessel1_draught, d.draught as vessel2_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, e.ais_signal as vessel1_signal, d.ais_signal as vessel2_signal from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' or e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' or d.uuid='".$mysqli->real_escape_string($v1['uuid'])."' or d.uuid='".$mysqli->real_escape_string($v2['uuid'])."') and e.is_disappeared = 'No'";
                         $result2 = $mysqli->query( $sql );
                         $num_rows = mysqli_num_rows( $result2 );
                         if( $num_rows == 0 ) {
