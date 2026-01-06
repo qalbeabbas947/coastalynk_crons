@@ -99,30 +99,30 @@ class STSTransferDetector {
      * Calculate risk level based on multiple factors
      */
     private function calculateRiskLevel($vessel1, $vessel2, $stationaryHours, $distanceNM) {
-        // $riskScore = 0;
+        $riskScore = 0;
         
-        // // Distance factor
-        // if ($distanceNM <= 0.1) $riskScore += 3;
-        // elseif ($distanceNM <= 0.2) $riskScore += 2;
-        // elseif ($distanceNM <= 0.3) $riskScore += 1;
+        // Distance factor
+        if ($distanceNM <= 0.1) $riskScore += 3;
+        elseif ($distanceNM <= 0.2) $riskScore += 2;
+        elseif ($distanceNM <= 0.3) $riskScore += 1;
         
         // Duration factor
-        if ($stationaryHours >= 6) return 'HIGH';
-        elseif ($stationaryHours >= 4) return 'MEDIUM';
-        else return 'LOW';
+        if ($stationaryHours >= 6) $riskScore += 3;
+        elseif ($stationaryHours >= 4) $riskScore += 2;
+        elseif ($stationaryHours >= 3) $riskScore += 1;
         
         // Vessel type factor
-        // $type1 = $vessel1['type'] ?? '';
-        // $type2 = $vessel2['type'] ?? '';
+        $type1 = $vessel1['type'] ?? '';
+        $type2 = $vessel2['type'] ?? '';
         
-        // if (stripos($type1, 'tanker') !== false && stripos($type2, 'tanker') !== false) {
-        //     $riskScore += 2; // Tanker-to-tanker transfer
-        // }
+        if (stripos($type1, 'tanker') !== false && stripos($type2, 'tanker') !== false) {
+            $riskScore += 2; // Tanker-to-tanker transfer
+        }
         
-        // // Determine risk level
-        // if ($riskScore >= 5) return 'HIGH';
-        // if ($riskScore >= 3) return 'MEDIUM';
-        // return 'LOW';
+        // Determine risk level
+        if ($riskScore >= 5) return 'HIGH';
+        if ($riskScore >= 3) return 'MEDIUM';
+        return 'LOW';
     }
     
     /**
@@ -291,7 +291,6 @@ class STSTransferDetector {
         $analysis = [
             'current_distance_nm' => 0,
             'stationary_hours' => 0,
-            'lock_time' => '',
             'proximity_consistency' => 0,
             'data_points_analyzed' => min(count($history1), count($history2)),
             'sts_detected' => false
@@ -322,7 +321,7 @@ class STSTransferDetector {
                             $point1['lat'], $point1['lon'],
                             $point2['lat'], $point2['lon']
                         );
-                        $analysis['lock_time'] = $point2['last_position_epoch'];
+                        
                         $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
                         $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
                         
@@ -351,8 +350,8 @@ class STSTransferDetector {
             // Detect STS based on criteria
             $analysis['sts_detected'] = (
                 $analysis['current_distance_nm'] <= 0.3 &&
-                $analysis['stationary_hours'] >= 5 &&
-                $analysis['proximity_consistency'] >= 0.5
+                $analysis['stationary_hours'] >= 3 &&
+                $analysis['proximity_consistency'] >= 0.7
             );
         }
         
@@ -435,12 +434,11 @@ class STSTransferDetector {
                 'confidence' => number_format($confidence, 2,'.', ''),
                 'remarks' => $remarks
             ],
-            'lock_time' => $analysis['lock_time'],
             'timestamp' => date('c'),
             'criteria_met' => [
-                'distance_≤_200_m' => $analysis['current_distance_nm'] <= 0.3,
-                'stationary_≥_6_hours' => $analysis['stationary_hours'] >= 5, //6
-                'consistent_proximity' => $analysis['proximity_consistency'] >= 0.5 // 0.7
+                'distance_≤_0.3_nm' => $analysis['current_distance_nm'] <= 0.3,
+                'stationary_≥_3_hours' => $analysis['stationary_hours'] >= 3,
+                'consistent_proximity' => $analysis['proximity_consistency'] >= 0.7
             ]
         ];
     }
@@ -492,7 +490,7 @@ class STSTransferDetector {
             $remarks[] = "Vessels outside typical STS distance";
         }
         
-        if ($analysis['stationary_hours'] >= 5) {
+        if ($analysis['stationary_hours'] >= 3) {
             $remarks[] = "Extended stationary period suggests transfer operations";
         }
         
