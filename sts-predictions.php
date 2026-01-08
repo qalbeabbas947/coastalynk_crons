@@ -35,7 +35,7 @@ class STSTransferDetector {
      * Check if vessel is stationary (speed < 0.5 knots)
      */
     private function isStationary($speed) {
-        return $speed < 0.5;
+        return $speed <= 1;
     }
     
     /**
@@ -104,7 +104,7 @@ class STSTransferDetector {
         // // Distance factor
         // if ($distanceNM <= 0.1) $riskScore += 3;
         // elseif ($distanceNM <= 0.2) $riskScore += 2;
-        // elseif ($distanceNM <= 0.3) $riskScore += 1;
+        // elseif ($distanceNM <= 0.107991) $riskScore += 1;
         
         // Duration factor
         if ($stationaryHours >= 6) return 'HIGH';
@@ -326,7 +326,7 @@ class STSTransferDetector {
                         $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
                         $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
                         
-                        if ($distance <= 0.3) {
+                        if ($distance <= 0.107991) {
                             $closeProximityCount++;
                         }
                         
@@ -350,9 +350,9 @@ class STSTransferDetector {
             
             // Detect STS based on criteria
             $analysis['sts_detected'] = (
-                $analysis['current_distance_nm'] <= 0.3 &&
-                $analysis['stationary_hours'] >= 5 &&
-                $analysis['proximity_consistency'] >= 0.5
+                $analysis['current_distance_nm'] <= 0.107991 &&
+                $analysis['stationary_hours'] >= 6 &&
+                $analysis['proximity_consistency'] >= 0.7
             );
         }
         
@@ -438,9 +438,9 @@ class STSTransferDetector {
             'lock_time' => $analysis['lock_time'],
             'timestamp' => date('c'),
             'criteria_met' => [
-                'distance_≤_200_m' => $analysis['current_distance_nm'] <= 0.3,
-                'stationary_≥_6_hours' => $analysis['stationary_hours'] >= 5, //6
-                'consistent_proximity' => $analysis['proximity_consistency'] >= 0.5 // 0.7
+                'distance_≤_200_m' => $analysis['current_distance_nm'] <= 0.107991,
+                'stationary_≥_6_hours' => $analysis['stationary_hours'] >= 6,
+                'consistent_proximity' => $analysis['proximity_consistency'] >= 0.7
             ]
         ];
     }
@@ -486,7 +486,7 @@ class STSTransferDetector {
             $remarks[] = "STS TRANSFER LIKELY IN PROGRESS";
         }
         
-        if ($analysis['current_distance_nm'] <= 0.3) {
+        if ($analysis['current_distance_nm'] <= 0.107991) {
             $remarks[] = "Vessels within STS operational distance";
         } else {
             $remarks[] = "Vessels outside typical STS distance";
