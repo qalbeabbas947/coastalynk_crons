@@ -7,6 +7,10 @@ use function PHPSTORM_META\elementType;
 
 ini_set( "display_errors", "On" );
 error_reporting(E_ALL);
+define( 'ALLOWED_STS_RANGE_NM', 0.107991 ); //0.107991
+define( 'ALLOWED_STS_RANGE_METERS', 200 ); //0.107991
+
+define( 'ALLOWED_STS_END_RANGE_NM', 300 ); 
 
 require 'PHPMailer/src/Exception.php';
 require 'PHPMailer/src/PHPMailer.php';
@@ -31,13 +35,15 @@ $coatalynk_npa_admin_email 	    = get_option_data( 'coatalynk_npa_admin_email' )
 $coatalynk_finance_admin_email 	= get_option_data( 'coatalynk_finance_admin_email' );
 $coatalynk_nimasa_admin_email 	= get_option_data( 'coatalynk_nimasa_admin_email' );
 
-$distance_threshold     = 200;         // 200 meters in nautical miles
 $heading_threshold = 25;               // degrees
 $sog_threshold = 1.0;                  // knots
-
-$distance_end_threshold = 300;       // 300 meters in nautical miles
 $heading_end_threshold = 40;           // degrees
 $sog_end_threshold = 3.0;              // knots
+
+// $heading_threshold = 45;               // degrees
+// $sog_threshold = 5.0;                  // knots
+// $heading_end_threshold = 50;           // degrees
+// $sog_end_threshold = 6.0;              // knots
 
 function search_vessel_by_name( $name, $mmsi ) {
     sleep(1);
@@ -144,7 +150,7 @@ if( empty( $lat ) || empty( $lon ) ) {
     $param_lon = $mysqli->real_escape_string( floatval( $lon ) );
 }
 
-coastalynk_log_entry(0, 'Started the console cron with Latitude:'.$lat.' and Longitude:'.$lon.' for STS operatoin.', 'sts');
+//coastalynk_log_entry(0, 'Started the console cron with Latitude:'.$lat.' and Longitude:'.$lon.' for STS operatoin.', 'sts');
 $zone_terminal_name = '';
 $candidates = [];
 $last_updated = date('Y-m-d H:i:s');
@@ -157,21 +163,20 @@ $port_radius = 10;
 
 $detector = new STSTransferDetector( $api_key );
 $table_name = $table_prefix . 'coastalynk_ports';
-// $sql = "select * from ".$table_name." where country_iso='NG' and port_type in( 'Coastal Zone', 'Territorial Zone', 'EEZ' ) order by title";
-// $i = 0;
-// if ($result = $mysqli->query($sql)) {
-//     while ( $obj = $result->fetch_object() ) { 
-//         echo '<br>';
-//         $url = sprintf(
-//                 "http://localhost:8089/coastalynk_crons/sts.php?lat=%f&lon=%f",
-//                 $obj->lat,
-//                 $obj->lon
-//             );
-//         echo '<br>'.($i++).' - <a href="'.$url.'" target="_blank">'.$url.'</a>';
-//     }
-// }
-// $result->free();
-
+$sql = "select * from ".$table_name." where country_iso='NG' and port_type in( 'Coastal Zone', 'Territorial Zone', 'EEZ' ) order by title";
+$i = 0;
+if ($result = $mysqli->query($sql)) {
+    while ( $obj = $result->fetch_object() ) { 
+        echo '<br>';
+        $url = sprintf(
+                "http://localhost:8089/coastalynk_crons/sts.php?lat=%f&lon=%f",
+                $obj->lat,
+                $obj->lon
+            );
+        echo '<br>'.($obj->port_id).' - <a href="'.$url.'" target="_blank">'.$url.'        '.$obj->title.'</a>';
+    }
+}
+$result->free();
 $sql = "SELECT *, ST_Distance_Sphere( POINT(lat, lon), POINT($param_lat, $param_lon) ) AS distance_meters FROM ".$table_name." where country_iso='NG' and port_type in( 'Port', 'Coastal Zone', 'Territorial Zone', 'EEZ' ) HAVING distance_meters is not null order by distance_meters asc limit 1;";
 if ($result = $mysqli->query($sql)) {
     if( $obj = $result->fetch_object() ) {
@@ -412,15 +417,20 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
         $item_count_main++;
         $item_count_sub = 0;
         
-        $vessel_array = [$v1['mmsi'] => ['uuid'=> $v1['uuid'], 'name'=> $v1['name']]];
+        $vessel_array = [$v1['mmsi'] => ['uuid'=> $v1['uuid'], 'name'=> $v1['name'], 'first'=> 'yes']];
         if( !empty( $v1['type'] ) && str_contains( $v1['type'], 'Tanker' ) ) {
             $event_id = 0;
+            $daughter_id = 0;
             foreach ($vessels as $v2) {
                 $item_count_sub++;
-                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker')) { // && $total_allowed < 1
-                    
+                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker') && !in_array( $v1['mmsi'], ['657263500'] )) { // && $total_allowed < 1
+
                     $new_entry = false;
                     $row = false;
+
+                    $sql = "SELECT e.id from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' or d.uuid='".$mysqli->real_escape_string($v2['uuid'])."' or e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' or d.uuid='".$mysqli->real_escape_string($v1['uuid'])."') and e.is_disappeared = 'No'";
+                    $resultchk = $mysqli->query( $sql );
+                    $is_already_engaged = mysqli_num_rows( $resultchk );  
                     $sql = "SELECT ST_Distance_Sphere( POINT(".$v1['lon'].", ".$v1['lat']."), POINT(".$v2['lon'].", ".$v2['lat'].") ) AS distance_meters limit 1;";
                     //if distance is 200m then qualify for the event creation.
                     $distance_meters = 0;
@@ -428,20 +438,18 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         $distance_obj = $result->fetch_object();
                         $distance_meters = $distance_obj->distance_meters;
                     }
-                    
                     $result->free();
                     $first_row = false;
                     $heading_diff = abs( floatval( $v1['heading'] ) - floatval( $v2['heading'] ) );
                     $heading_diff = min($heading_diff, 360 - $heading_diff); // Handle circular nature 
-                           
-                    $sqlmain = "SELECT e.id, d.id as did, e.uuid as vessel1_uuid, d.uuid as vessel2_uuid, e.is_email_sent, e.draught as vessel1_draught, d.draught as vessel2_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, e.ais_signal as vessel1_signal, d.ais_signal as vessel2_signal, d.status as daughter_status from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where ( (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v2['uuid'])."') or ( e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v1['uuid'])."')) and e.is_disappeared = 'No'";
+                    $sqlmain = "SELECT e.id, d.id as did, d.event_id, e.deadweight as vessel1_deadweight, d.deadweight as vessel2_deadweight, e.port, e.zone_type, e.zone_ship, e.uuid as vessel1_uuid, e.zone_terminal_name, e.name as vessel1_name, d.name as vessel2_name, e.mmsi as vessel1_mmsi, d.mmsi as vessel2_mmsi, d.uuid as vessel2_uuid, e.is_email_sent, e.end_date, e.draught as vessel1_draught, d.draught as vessel2_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, e.completed_draught as vessel1_completed_draught, d.completed_draught as vessel2_completed_draught , e.ais_signal as vessel1_signal, d.ais_signal as vessel2_signal, d.status as daughter_status from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where ( (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v2['uuid'])."') or ( e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v1['uuid'])."')) and e.is_disappeared = 'No'";
                     $result2 = $mysqli->query( $sqlmain );
-
                     $num_rows = mysqli_num_rows( $result2 );
                     
-                    if( $num_rows == 0 ) {
+                    if( $num_rows == 0 && $is_already_engaged == 0 ) {
                         $new_entry = true;
                         $event_id = 0;
+                        $daughter_id = 0;
                     } else {
                         while( $row = mysqli_fetch_assoc($result2) ) {
                             if( !$first_row )
@@ -449,10 +457,12 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             if( $row['daughter_status'] == 'ended' ) {
                                 $event_id = $row['id'];
                                 $new_entry = true;
+                                $daughter_id = $row['did'];
+                                
                             } else {
                                 if( $row['daughter_status'] != 'ended' ) {
                                     $is_event_ended = false;
-                                    if( $distance_meters > $distance_end_threshold ) {
+                                    if( $distance_meters > ALLOWED_STS_END_RANGE_NM ) {
                                         $is_event_ended = true;
                                     }
                                     
@@ -465,8 +475,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                     }
                                 
                                     if( $is_event_ended ) {
-                                        $sql = "update ".$event_table_daughter." set status='ended' where id='".$row['did']."'";
-                                        $mysqli->query($sql);
+                                        process_complete_sts_vessels( $row );
                                     } else {
                                         if( ! in_array( $row['did'], $array_daughter_ids ) ) {
                                             $array_daughter_ids[] = $row['did'];
@@ -478,6 +487,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     }
 
                     $result2->free();
+                    $resultchk->free();
 
                     if( $new_entry == true ) {
                     
@@ -485,7 +495,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         $at_event_creation_allowed_speed = false;
                         $at_event_creation_allowed_heading = false;
 
-                        if( $distance_meters <= $distance_threshold ) {
+                        if( $distance_meters <= ALLOWED_STS_RANGE_METERS ) {
                             $at_event_creation_close_distance = true;
                         }
 
@@ -501,7 +511,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $vessel_array[$v2['mmsi']] = ['uuid'=> $v2['uuid'], 'name'=> $v2['name']];
                         }
 
-                    } else {
+                    } else if( $first_row ) {
 
                         $vessel1_signal = coastalynk_signal_status( $first_row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
                         $vessel2_signal = coastalynk_signal_status( $first_row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
@@ -523,8 +533,9 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     }
                 }   
             }
-
+            
             if( count( $vessel_array ) > 1 ) {
+                
                 $vessel_array_keys = array_keys($vessel_array);
                 $mother_ship = false;
                 $cached_data = [];
@@ -561,7 +572,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         $mother_ship = determineMother( $vess1, $vess2,$vess1['mmsi'], $vess2['mmsi'] ); 
                     }
                 }
-
+                
                 foreach( $vessel_array as $mmsi => $vessel_data ) {
 
                     if( $mother_ship['mmsi'] != $mmsi ) {
@@ -570,41 +581,38 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
 
                         //echo '<br>'.$mother_ship['mmsi'].'-'.$mmsi.' = '.($mother_ship['mmsi']==$mmsi?'equal':'not_equal');
                         $detectresult = $detector->detectSTSTransfer($vehicel_1, $vehicel_2);
+                        
                        // if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) 
                         {
-                            
-                            $sql = "SELECT e.id, d.id as did, e.status,e.uuid as vessel1_uuid, d.uuid as vessel2_uuid from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.mmsi='".$mysqli->real_escape_string($mother_ship['mmsi'])."' or e.mmsi='".$mysqli->real_escape_string($v2['mmsi'])."' or d.mmsi='".$mysqli->real_escape_string($v1['mmsi'])."' or d.mmsi='".$mysqli->real_escape_string($v2['mmsi'])."') and e.is_disappeared = 'No'";
-                            $not_in_process = true;
-                            $result_event_id = $mysqli->query( $sql );
-                            $num_rows = mysqli_num_rows( $result_event_id );
-                            if( $num_rows > 0) {
-                                $evt_obj = $result_event_id->fetch_object();
-                                $event_id = $evt_obj->id;
-                                if( $evt_obj->status != 'Detected' ) {
-                                    continue;
+                            if( $event_id == 0 ) {
+                                $sql = "SELECT e.id, d.id as did, e.status, e.end_date,e.uuid as vessel1_uuid, d.uuid as vessel2_uuid from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.mmsi='".$mysqli->real_escape_string($vehicel_1['mmsi'])."') and e.is_disappeared = 'No'";
+                                $not_in_process = true;
+                                $result_event_id = $mysqli->query( $sql );
+                                $num_rows = mysqli_num_rows( $result_event_id );
+                                if( $num_rows > 0) {
+                                    $evt_obj = $result_event_id->fetch_object();print_r($evt_obj);
+                                    $event_id = $evt_obj->id;
+                                    if( $evt_obj->status != 'Detected' ) {
+                                        continue;
+                                    }
+
+                                    if( !in_array( $evt_obj->did, $array_daughter_ids ) ) {
+                                        $array_daughter_ids[] = $evt_obj->did;
+                                    }
+                                    
+                                    if( !in_array( $evt_obj->id, $array_ids ) ) {
+                                        $array_ids[] = $evt_obj->id; 
+                                        $array_uidds[] = [ $evt_obj->vessel1_uuid, $evt_obj->vessel2_uuid ];
+                                    }
                                 }
 
-                                if( !in_array( $evt_obj->did, $array_daughter_ids ) ) {
-                                    $array_daughter_ids[] = $evt_obj->did;
-                                }
-                                
-                                if( !in_array( $evt_obj->id, $array_ids ) ) {
-                                    $array_ids[] = $evt_obj->id; 
-                                    $array_uidds[] = [ $evt_obj->vessel1_uuid, $evt_obj->vessel2_uuid ];
-                                }
+                                $result_event_id->free();
                             }
-
-                            $result_event_id->free();
+                            
                             
                             $vehicel_1_detail = $cached_detail_data[$mother_ship['mmsi']];
                             $vehicel_2_detail = $cached_detail_data[$mmsi];
                             
-                            // echo '<pre>Vessel Data Start<BR>'; print_r($vehicel_1);
-                            // echo '<pre>Vessel Detail Data Start<BR>'; print_r( $vehicel_1_detail);echo '</pre>';
-
-                            // echo '<pre>Vessel Data Start<BR>'; print_r($vehicel_2);
-                            // echo '<pre>Vessel Detail Data Start<BR>'; print_r( $vehicel_2_detail);echo '</pre>';
-
                             $zone_type = 'No STS Zone';
                             $new_zone_terminal_name = '';
                             $param_v1_lat = floatval( $vehicel_2['lat'] );
@@ -737,7 +745,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 if ($mysqli->query( $sql ) !== TRUE) {
                                     echo "Error: " . $sql . "\n" . $mysqli->error;
                                 } else {
-                                    $event_id = $mysqli->insert_id;
+                                    $event_id = $mysqli->insert_id;coastalynk_log_entry($event_id, $sql, 'm query');
 
                                     if( ! in_array( $event_id, $array_ids ) ) {
                                         $array_ids[] = $event_id;
@@ -746,11 +754,24 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                     coastalynk_log_entry($event_id, 'Added the parent vessel '.$vehicel_1['name'].' with MMSI '.$vehicel_1['mmsi'].' and IMO '.$vehicel_1['imo'].' to the event.', 'sts');
                                 }
                                 
+                            } else if( $daughter_id > 0 && $event_id > 0) {  //
+                                $sql = "Update $event_table_mother set
+                                            `lat`='".$vehicel_1['lat']."',
+                                            `lon`='".$vehicel_1['lon']."',
+                                            `speed`='".floatval($vehicel_1['speed'])."',
+                                            `navigation_status`='".$v1_navigation_status."',
+                                            `distance`='".floatval($dist)."',
+                                            `last_updated`=NOW(),
+                                            `status`='".$status."' where id='".$event_id."'";
+                                    coastalynk_log_entry($event_id, $sql, 'm query');
+                                    if ($mysqli->query( $sql ) !== TRUE) {
+                                        echo "Error: " . $sql . "\n" . $mysqli->error;
+                                    }
                             }
 
                             if( $event_id > 0 ) {
                                 
-                                $sql = "SELECT id from ".$event_table_daughter." where event_id = '".$mysqli->real_escape_string($event_id)."' and status!='ended' and mmsi='".$mysqli->real_escape_string($vehicel_2['mmsi'])."'";
+                                $sql = "SELECT id from ".$event_table_daughter." where event_id = '".$mysqli->real_escape_string($event_id)."' and mmsi='".$mysqli->real_escape_string($vehicel_2['mmsi'])."'";
                                 $result_event_id = $mysqli->query( $sql );
                                 $num_rows = mysqli_num_rows( $result_event_id );
                                 if( $num_rows == 0) {
@@ -797,7 +818,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         NOW(),
                                         ".$lock_time."
                                         )";
-                        
+                                    coastalynk_log_entry($insert_id, $sql, 'd query');
                                     if ($mysqli->query( $sql ) !== TRUE) {
                                         echo "Error: " . $sql . "\n" . $mysqli->error;
                                     } else {
@@ -910,6 +931,52 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         } catch (Exception $e) {
                                             echo "Email could not be sent. Error: {$mail->ErrorInfo}";
                                         }
+                                    }
+                                } else {
+                                    while( $row = mysqli_fetch_array($result_event_id, MYSQLI_ASSOC) ) {
+                                        $daughter_status = 'tentative';
+                                        if( floatval( $stationary_duration_hours ) >= 6 ) {
+                                            $daughter_status = 'active';
+                                        }
+
+                                       $sql = "Update $event_table_daughter set
+                                            `event_id`='".$event_id."',
+                                            `uuid`='".$vehicel_2['uuid']."',
+                                            `name`='".$vehicel_2['name']."',
+                                            `mmsi`='".$vehicel_2['mmsi']."',
+                                            `imo`='".$vehicel_2['imo']."',
+                                            `country_iso`='".$vehicel_2['country_iso']."',
+                                            `type`='".$vehicel_2['type']."',
+                                            `type_specific`='".$vehicel_2['type_specific']."',
+                                            `lat`='".$vehicel_2['lat']."',
+                                            `lon`='".$vehicel_2['lon']."',
+                                            `speed`='".floatval($vehicel_2['speed'])."',
+                                            `navigation_status`='".$v2_navigation_status."',
+                                            `draught`='".$v2_current_draught."',
+                                            `last_position_UTC`='".date('Y-m-d H:i:s', strtotime($vehicel_2['last_position_UTC']))."',
+                                            `ais_signal`='AIS Consistent',
+                                            `deadweight`='".$vessel2_deadweight."',
+                                            `gross_tonnage`='".$vessel2_gross_tonnage."',
+                                            `distance`='".floatval($dist)."',
+                                            `last_updated`=NOW(),
+                                            `remarks`='".$remarks."',
+                                            `event_percentage`='".floatval( $confidence )."',
+                                            `cargo_category_type`='".$predicted_cargo_1."',
+                                            `risk_level`='".$risk_level."',
+                                            `stationary_duration_hours`='".$stationary_duration_hours."',
+                                            `proximity_consistency`='".$proximity_consistency."',
+                                            `data_points_analyzed`='".$data_points_analyzed."',
+                                            `operationmode`='".$operation_mode."',
+                                            `status`='".$daughter_status."',
+                                            `step`='0',
+                                            `joining_date`=NOW(),
+                                            `lock_time`=".$lock_time." where id='".$row['id']."'";
+                                        coastalynk_log_entry($row['id'], $sql, 'd query');
+
+                                        if ($mysqli->query( $sql ) !== TRUE) {
+                                            echo "Error: " . $sql . "\n" . $mysqli->error;
+                                        }
+                                    
                                     }
                                 }
                                 $result_event_id->free();
@@ -1035,7 +1102,6 @@ if( $num_rows > 0 ) {
         }
 
         $total_hours = $interval->days * 24 + $interval->h + ($interval->i / 60) + ($interval->s / 3600);
-        echo '<br>total_hours:';print_r($total_hours);
         if( $total_hours <= 9 && $total_hours >= 6  ) {
 
             $outcome_status = 'Likely Transfer';
@@ -1055,13 +1121,13 @@ if( $num_rows > 0 ) {
 
             $sql = "update ".$event_table_daughter." set ".$updatable_daughter_fields."step = 2,flag_status = '".$flag_status."', outcome_status = '".$outcome_status."',draught_change = '".$draught_diff."',operationmode = '".$current_status."',event_desc = '".$event_desc."', ais_signal = '".$vessel1_signal."', estimated_cargo = '".$estimated_cargo."', last_updated = NOW() where id='".$row['did']."'";
             $mysqli->query($sql);
-
+            coastalynk_log_entry($row['did'], $sql, 'middle d 1 query');
             $total_daughters = total_sts_daughter_vessels( $row['event_id'] );
             $total_daughters_same_steps = total_sts_daughter_vessels( $row['event_id'], 2  );
             if( $total_daughters == $total_daughters_same_steps  ) {
 
                $sql = "update ".$event_table_mother." set ".$updatable_mother_fields." status = 'Concluded', ais_signal = '".$vessel2_signal."', last_updated = NOW() where id='".$row['id']."'";
-                $mysqli->query($sql);
+                $mysqli->query($sql);coastalynk_log_entry($row['id'], $sql, 'middle m 1 query');
             }
            
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' upto 12hrs: '.$log, 'sts');
@@ -1086,13 +1152,13 @@ if( $num_rows > 0 ) {
 
             $sql = "update ".$event_table_daughter." set flag_status = '".$flag_status."', outcome_status = '".$outcome_status."', step = 3, draught_change = '".$draught_diff."',operationmode = '".$current_status."',event_desc = '".$event_desc."',last_updated = NOW(), is_disappeared='Yes' where id='".$row['did']."'";
             $mysqli->query($sql);
-
+coastalynk_log_entry($row['did'], $sql, 'middle d 2 query');
             $total_daughters = total_sts_daughter_vessels( $row['event_id'] );
             $total_daughters_same_steps = total_sts_daughter_vessels( $row['event_id'], 3  );
             if( $total_daughters == $total_daughters_same_steps  ) {
 
                 $sql = "update ".$event_table_mother." set ais_signal = '".$vessel2_signal."', is_disappeared='Yes', last_updated = NOW() where id='".$row['id']."'";
-                $mysqli->query($sql);
+                $mysqli->query($sql);coastalynk_log_entry($row['id'], $sql, 'middle m 2 query');
             }
 
             coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after 24hrs: '.$log, 'sts');
@@ -1109,7 +1175,7 @@ if( count( $array_ids ) == 0 ) {
 if( count( $array_daughter_ids ) == 0 ) {
     $array_daughter_ids[] = 0;
 }
-
+$array_daughter_ids = [0];
 $array_daughter_ids = array_unique($array_daughter_ids);
 
 if( count( $array_ids ) > 0 ) {
@@ -1120,134 +1186,7 @@ if( count( $array_ids ) > 0 ) {
     $num_rows = mysqli_num_rows( $result4 );
     if( $num_rows > 0 ) {
         while( $row = mysqli_fetch_array( $result4, MYSQLI_ASSOC ) ) {
-            $estimated_cargo = 0;
-            if( $row['daughter_status'] != 'ended' ) {
-                $v1 = get_datalastic_field( $row['vessel1_uuid'], '', true );
-                $v2 = get_datalastic_field( $row['vessel2_uuid'], '', true );
-                
-                $v1_current_draught = $v1['current_draught'];
-                $v2_current_draught = $v2['current_draught'];
-
-                $draught_1_diff = ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) );
-                $draught_2_diff = ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) );
-
-                $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
-                $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
-
-                $calculator = new NigerianPortsAfterDraught(true);
-                
-                $tanker_by_type = $calculator->getTankerTypeByDWT($row['vessel1_deadweight']);
-
-                $vessel_tanker_type     = 'MR';
-                $vessel_prodtype    = 'Crude Light';
-                if( floatval($row['vessel1_deadweight']) > 0 ) {
-                    $vessel_tanker_type     = $tanker_by_type['primary_type']['type'];
-                    $vessel_prodtype    = $vessel_product_type[$tanker_by_type['primary_type']['type']];
-                }
-
-                $vessel_1 = [
-                    'previous_draught' => $row['vessel1_draught'],
-                    'current_draught' => $v1_current_draught,
-                    'zone' => $row['zone_terminal_name'],
-                    'tanker_type' => $vessel_tanker_type,
-                    'product_type' => $vessel_prodtype,
-                    'timestamp' => date('Y-m-d H:i:s'),
-                    'ais_source' => $vessel1_signal,
-                    'mmsi' => $row['vessel1_mmsi']
-                ];
-
-                $event_desc = 'event_description';
-                $current_status = 'current_status';
-                $result1 = $calculator->calculateAfterDraught($vessel_1);
-                if( is_array($result1) && count($result1) > 0 ) {
-                    $v1_current_draught = $result1['after_draught'];
-                    $draught_1_diff = $result1['draught_change'];
-                    $event_desc = $result1['event_description'];
-                    $current_status = $result1['current_status'];
-                }
-                
-                
-                $tanker_by_type2 = $calculator->getTankerTypeByDWT($row['vessel2_deadweight']);
-                $vessel_tanker_type     = 'MR';
-                $vessel_prodtype    = 'Crude Light';
-                if( floatval($row['vessel2_deadweight']) > 0 ) {
-                    $vessel_tanker_type     = $tanker_by_type2['primary_type']['type'];
-                    $vessel_prodtype    = $vessel_product_type[$tanker_by_type2['primary_type']['type']];
-                }
-
-                $vessel_2 = [
-                    'previous_draught' => $row['vessel2_draught'],
-                    'current_draught' => $v2_current_draught,
-                    'zone' => $row['zone_terminal_name'],
-                    'tanker_type' => $vessel_tanker_type,
-                    'product_type' => $vessel_prodtype,
-                    'timestamp' => date('Y-m-d H:i:s'),
-                    'ais_source' => $vessel2_signal,
-                    'mmsi' => $row['vessel2_mmsi']
-                ];
-
-                $result2 = $calculator->calculateAfterDraught($vessel_2);
-                if( is_array($result2) && count($result2) > 0 ) {
-                    $v2_current_draught = $result2['after_draught'];
-                    $draught_2_diff = $result2['draught_change'];
-                }
-                $event_desc = '';
-                $current_status = '';
-                $estimated_cargo = 0;
-                if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
-                    if( is_array($result1) && count($result1) > 0 ) {
-                        $event_desc = $result1['event_description'];
-                        $current_status = $result1['current_status'];
-                        $estimated_cargo = $result1['cargo_mt'];
-                    }
-                } else if( $draught_2_diff >= 0.3 || $draught_2_diff <= -0.3 ) {
-                    if( is_array($result2) && count($result2) > 0 ) {
-                        $event_desc = $result2['event_description'];
-                        $current_status = $result2['current_status'];
-                        $estimated_cargo = $result2['cargo_mt']; 
-                    }
-                }
-                
-                $mother_vessel_number = '';
-                $draught_diff = 0;
-                if( $draught_1_diff >= 0.3 && $draught_1_diff <= -0.3 ) {
-                    $mother_vessel_number = " mother_vessel_number = '1',";
-                    $draught_diff = $draught_1_diff;
-                } else if( $draught_2_diff >= 0.3 && $draught_2_diff <= -0.3 ) {
-                    $mother_vessel_number = " mother_vessel_number = '2',";
-                    $draught_diff = $draught_2_diff;
-                }
-
-                $outcome_status = 'Likely Transfer';
-                if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
-                    $outcome_status = 'AIS-Limited';
-                } else {
-                    if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
-                        $outcome_status = 'Inconclusive';
-                    }
-                }
-
-                $log = 'Vessel 1 Draught Difference: '.$draught_1_diff;
-                $log .= ', Vessel 2 Draught Difference: '.$draught_2_diff;
-                $log .= ', Vessel 1 Signal: '.$vessel1_signal;
-                $log .= ', Vessel 2 Signal: '.$vessel2_signal;
-                $log .= ', Event Desc: '.$event_desc;
-
-                
-                $sql = "update ".$event_table_daughter." set step = 1, draught_change = '".$draught_diff."', status = 'ended',outcome_status = '".$outcome_status."',operationmode = '".$current_status."',event_desc = '".$event_desc."',is_complete = 'Yes', ais_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['did']."'";
-                $mysqli->query($sql);
-
-                $total_daughters = total_sts_daughter_vessels( $row['event_id'] );
-                $total_daughters_same_steps = total_sts_daughter_vessels( $row['event_id'], 1  );
-                
-                if( $total_daughters == $total_daughters_same_steps  ) {
-
-                    $sql = "update ".$event_table_mother." set is_complete = 'Yes', status = 'Completed',ais_signal = '".$vessel1_signal."', completed_draught = '".floatval( $v1_current_draught )."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
-                    $mysqli->query($sql);
-                }
-                coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after vessels leave the area: '.$log, 'sts');
-            }
-            
+            process_complete_sts_vessels( $row );
         }
     }
 
@@ -1260,3 +1199,146 @@ $num_rows = mysqli_num_rows($result);
 coastalynk_update_summary('STS', $num_rows);
 
 $mysqli->close(); // Close the database connection
+
+
+function process_complete_sts_vessels( $row ) {
+    
+    global $table_prefix, $vessel_product_type;
+
+    $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
+
+    if ($mysqli->connect_error) {
+        die("Connection failed: " . $mysqli->connect_error);
+    }
+
+    $event_table_mother = $table_prefix . 'coastalynk_sts_events';
+    $event_table_daughter = $table_prefix . 'coastalynk_sts_event_detail';
+
+    $estimated_cargo = 0;
+    if( $row['daughter_status'] != 'ended' ) {
+        $v1 = get_datalastic_field( $row['vessel1_uuid'], '', true );
+        $v2 = get_datalastic_field( $row['vessel2_uuid'], '', true );
+        
+        $v1_current_draught = $v1['current_draught'];
+        $v2_current_draught = $v2['current_draught'];
+
+        $draught_1_diff = ( floatval( $v1_current_draught ) - floatval($row['vessel1_draught']) );
+        $draught_2_diff = ( floatval( $v2_current_draught ) - floatval($row['vessel2_draught']) );
+
+        $vessel1_signal = coastalynk_signal_status( $row['vessel1_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v1['last_position_UTC'])) );
+        $vessel2_signal = coastalynk_signal_status( $row['vessel2_last_position_UTC'], date('Y-m-d H:i:s', strtotime($v2['last_position_UTC'])) );
+
+        $calculator = new NigerianPortsAfterDraught(true);
+        
+        $tanker_by_type = $calculator->getTankerTypeByDWT($row['vessel1_deadweight']);
+
+        $vessel_tanker_type     = 'MR';
+        $vessel_prodtype    = 'Crude Light';
+        if( floatval($row['vessel1_deadweight']) > 0 ) {
+            $vessel_tanker_type     = $tanker_by_type['primary_type']['type'];
+            $vessel_prodtype    = $vessel_product_type[$tanker_by_type['primary_type']['type']];
+        }
+
+        $vessel_1 = [
+            'previous_draught' => $row['vessel1_draught'],
+            'current_draught' => $v1_current_draught,
+            'zone' => $row['zone_terminal_name'],
+            'tanker_type' => $vessel_tanker_type,
+            'product_type' => $vessel_prodtype,
+            'timestamp' => date('Y-m-d H:i:s'),
+            'ais_source' => $vessel1_signal,
+            'mmsi' => $row['vessel1_mmsi']
+        ];
+
+        $event_desc = 'event_description';
+        $current_status = 'current_status';
+        $result1 = $calculator->calculateAfterDraught($vessel_1);
+        if( is_array($result1) && count($result1) > 0 ) {
+            $v1_current_draught = $result1['after_draught'];
+            $draught_1_diff = $result1['draught_change'];
+            $event_desc = $result1['event_description'];
+            $current_status = $result1['current_status'];
+        }
+        
+        
+        $tanker_by_type2 = $calculator->getTankerTypeByDWT($row['vessel2_deadweight']);
+        $vessel_tanker_type     = 'MR';
+        $vessel_prodtype    = 'Crude Light';
+        if( floatval($row['vessel2_deadweight']) > 0 ) {
+            $vessel_tanker_type     = $tanker_by_type2['primary_type']['type'];
+            $vessel_prodtype    = $vessel_product_type[$tanker_by_type2['primary_type']['type']];
+        }
+
+        $vessel_2 = [
+            'previous_draught' => $row['vessel2_draught'],
+            'current_draught' => $v2_current_draught,
+            'zone' => $row['zone_terminal_name'],
+            'tanker_type' => $vessel_tanker_type,
+            'product_type' => $vessel_prodtype,
+            'timestamp' => date('Y-m-d H:i:s'),
+            'ais_source' => $vessel2_signal,
+            'mmsi' => $row['vessel2_mmsi']
+        ];
+
+        $result2 = $calculator->calculateAfterDraught($vessel_2);
+        if( is_array($result2) && count($result2) > 0 ) {
+            $v2_current_draught = $result2['after_draught'];
+            $draught_2_diff = $result2['draught_change'];
+        }
+        $event_desc = '';
+        $current_status = '';
+        $estimated_cargo = 0;
+        if( $draught_1_diff >= 0.3 || $draught_1_diff <= -0.3 ) {
+            if( is_array($result1) && count($result1) > 0 ) {
+                $event_desc = $result1['event_description'];
+                $current_status = $result1['current_status'];
+                $estimated_cargo = $result1['cargo_mt'];
+            }
+        } else if( $draught_2_diff >= 0.3 || $draught_2_diff <= -0.3 ) {
+            if( is_array($result2) && count($result2) > 0 ) {
+                $event_desc = $result2['event_description'];
+                $current_status = $result2['current_status'];
+                $estimated_cargo = $result2['cargo_mt']; 
+            }
+        }
+        
+        $mother_vessel_number = '';
+        $draught_diff = 0;
+        if( $draught_1_diff >= 0.3 && $draught_1_diff <= -0.3 ) {
+            $mother_vessel_number = " mother_vessel_number = '1',";
+            $draught_diff = $draught_1_diff;
+        } else if( $draught_2_diff >= 0.3 && $draught_2_diff <= -0.3 ) {
+            $mother_vessel_number = " mother_vessel_number = '2',";
+            $draught_diff = $draught_2_diff;
+        }
+
+        $outcome_status = 'Likely Transfer';
+        if( $draught_1_diff <= 0.3 && $draught_1_diff >= -0.3 && $draught_2_diff <= 0.3 && $draught_2_diff >= -0.3 ) {
+            $outcome_status = 'AIS-Limited';
+        } else {
+            if( ($draught_1_diff >= 0.3 && $draught_2_diff >= 0.3) || ( $draught_1_diff < -0.3 && $draught_2_diff < -0.3 ) ) {
+                $outcome_status = 'Inconclusive';
+            }
+        }
+
+        $log = 'Vessel 1 Draught Difference: '.$draught_1_diff;
+        $log .= ', Vessel 2 Draught Difference: '.$draught_2_diff;
+        $log .= ', Vessel 1 Signal: '.$vessel1_signal;
+        $log .= ', Vessel 2 Signal: '.$vessel2_signal;
+        $log .= ', Event Desc: '.$event_desc;
+
+        
+        $sql = "update ".$event_table_daughter." set step = 1, draught_change = '".$draught_diff."', status = 'ended',outcome_status = '".$outcome_status."',operationmode = '".$current_status."',event_desc = '".$event_desc."',is_complete = 'Yes', ais_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', completed_draught = '".floatval( $v2_current_draught)."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['did']."'";
+        $mysqli->query($sql);
+coastalynk_log_entry($row['did'], $sql, 'bottom d query');
+        $total_daughters = total_sts_daughter_vessels( $row['event_id'] );
+        $total_daughters_same_steps = total_sts_daughter_vessels( $row['event_id'], 1  );
+        
+        if( $total_daughters == $total_daughters_same_steps  ) {
+
+            $sql = "update ".$event_table_mother." set is_complete = 'Yes', status = 'Completed',ais_signal = '".$vessel1_signal."', completed_draught = '".floatval( $v1_current_draught )."', end_date = NOW(), last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
+            $mysqli->query($sql);coastalynk_log_entry($row['id'], $sql, 'bottom m query');
+        }
+        coastalynk_log_entry($row['id'], 'STS Between '.$v1['name'].' and '.$v2['name'].' after vessels leave the area: '.$log, 'sts');
+    }
+}
