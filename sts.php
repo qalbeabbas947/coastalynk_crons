@@ -241,7 +241,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_mother."` (
   `draught` float DEFAULT 0,
   `completed_draught` float DEFAULT 0,
   `last_position_UTC` timestamp NULL DEFAULT NULL,
-  `ais_signal` enum('','AIS Gap','AIS Consistent') NOT NULL,
+  `ais_signal` enum('','AIS Signal Gap Detected','AIS  Consistent Signal Detected') NOT NULL,
   `deadweight` float DEFAULT 0,
   `gross_tonnage` float DEFAULT 0,
   `port` varchar(255) DEFAULT '',
@@ -285,7 +285,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_daughter."` (
   `deadweight` float DEFAULT 0,
   `gross_tonnage` float DEFAULT 0,
   `draught_change` float DEFAULT 0,
-  `ais_signal` enum('','AIS Gap','AIS Consistent') DEFAULT NULL,
+  `ais_signal` enum('','AIS Signal Gap Detected','AIS  Consistent Signal Detected') DEFAULT NULL,
   `joining_date` timestamp NULL DEFAULT NULL,
    lock_time timestamp NULL DEFAULT NULL,
   `end_date` timestamp NULL DEFAULT NULL,
@@ -739,7 +739,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                                 '".$new_zone_terminal_name."',
                                             NOW(), 
                                             '".$last_updated."', '".$status."',
-                                            'No', 'AIS Consistent'
+                                            'No', 'AIS  Consistent Signal Detected'
                                             )";
                                 
                                 if ($mysqli->query( $sql ) !== TRUE) {
@@ -755,12 +755,15 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 }
                                 
                             } else if( $daughter_id > 0 && $event_id > 0) {  //
+
                                 $sql = "Update $event_table_mother set
                                             `lat`='".$vehicel_1['lat']."',
                                             `lon`='".$vehicel_1['lon']."',
                                             `speed`='".floatval($vehicel_1['speed'])."',
                                             `navigation_status`='".$v1_navigation_status."',
                                             `distance`='".floatval($dist)."',
+                                             end_date = Null, 
+                                             is_complete = 'No',
                                             `last_updated`=NOW(),
                                             `status`='".$status."' where id='".$event_id."'";
                                     coastalynk_log_entry($event_id, $sql, 'm query');
@@ -800,7 +803,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '" . $v2_navigation_status . "',
                                         '" . $v2_current_draught . "',
                                         '" . date('Y-m-d H:i:s', strtotime($vehicel_2['last_position_UTC'])) . "',
-                                        'AIS Consistent',
+                                        'AIS  Consistent Signal Detected',
                                         '$vessel2_deadweight',
                                         '$vessel2_gross_tonnage',
                                         '" . floatval($dist) . "',
@@ -954,7 +957,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `navigation_status`='".$v2_navigation_status."',
                                             `draught`='".$v2_current_draught."',
                                             `last_position_UTC`='".date('Y-m-d H:i:s', strtotime($vehicel_2['last_position_UTC']))."',
-                                            `ais_signal`='AIS Consistent',
+                                            `ais_signal`='AIS  Consistent Signal Detected',
                                             `deadweight`='".$vessel2_deadweight."',
                                             `gross_tonnage`='".$vessel2_gross_tonnage."',
                                             `distance`='".floatval($dist)."',
@@ -968,9 +971,11 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `data_points_analyzed`='".$data_points_analyzed."',
                                             `operationmode`='".$operation_mode."',
                                             `status`='".$daughter_status."',
-                                            `step`='0',
+                                            `step`='0',`flag_status`='',`outcome_status`='',is_complete = 'No',
+                                            end_date = Null,is_disappeared = 'No',
                                             `joining_date`=NOW(),
                                             `lock_time`=".$lock_time." where id='".$row['id']."'";
+
                                         coastalynk_log_entry($row['id'], $sql, 'd query');
 
                                         if ($mysqli->query( $sql ) !== TRUE) {
@@ -1175,7 +1180,7 @@ if( count( $array_ids ) == 0 ) {
 if( count( $array_daughter_ids ) == 0 ) {
     $array_daughter_ids[] = 0;
 }
-$array_daughter_ids = [0];
+
 $array_daughter_ids = array_unique($array_daughter_ids);
 
 if( count( $array_ids ) > 0 ) {

@@ -175,9 +175,9 @@ function coastalynk_signal_status( $startDate, $endDate ) {
     $interval = $startDate->diff($endDate);
     $signal = '';
     if( floatval( $interval->h ) <= 2 ) {
-        $signal = 'AIS Consistent';
+        $signal = 'AIS  Consistent Signal Detected';
     } else {
-        $signal = 'AIS Gap';
+        $signal = 'AIS Signal Gap Detected';
     }
 
     return $signal;
