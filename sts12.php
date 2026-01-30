@@ -1,6 +1,15 @@
 <?php
 
+ini_set("display_errors", "On");
+error_reporting(E_ALL);
 
+// Constants
+define('ALLOWED_STS_RANGE_NM', 0.1); // Approximately 185 meters
+define('END_DISTANCE_NM', 0.81); // 1500 meters in nautical miles (~0.81 NM)
+define('END_SPEED_KNOTS', 1.0);
+define('END_DURATION_MINUTES', 20); // Time threshold for distance check
+define('END_SPEED_DURATION_MINUTES', 15); // Time threshold for speed check
+define('MAX_TRANSFER_HOURS', 8); // Maximum STS transfer duration cap
 
 class STSTransferDetector {
     private $apiKey;
@@ -31,7 +40,7 @@ class STSTransferDetector {
     }
     
     /**
-     * Check if vessel is stationary (speed < 0.5 knots)
+     * Check if vessel is stationary (speed < 1.0 knots)
      */
     private function isStationary($speed) {
         return $speed <= 1;
@@ -45,8 +54,8 @@ class STSTransferDetector {
         $params = [
             'api-key' => $this->apiKey,
             'mmsi' => $mmsi,
-            'from' => date('Y-m-d', strtotime("-$hours hours")),
-            'to' => date('Y-m-d')
+            'from' => date('Y-m-d\TH:i:s\Z', strtotime("-$hours hours")),
+            'to' => date('Y-m-d\TH:i:s\Z')
         ];
         
         $url = $endpoint . '?' . http_build_query($params);
@@ -98,30 +107,10 @@ class STSTransferDetector {
      * Calculate risk level based on multiple factors
      */
     private function calculateRiskLevel($vessel1, $vessel2, $stationaryHours, $distanceNM) {
-        // $riskScore = 0;
-        
-        // // Distance factor
-        // if ($distanceNM <= 0.1) $riskScore += 3;
-        // elseif ($distanceNM <= 0.2) $riskScore += 2;
-        // elseif ($distanceNM <= ALLOWED_STS_RANGE_NM) $riskScore += 1;
-        
         // Duration factor
         if ($stationaryHours >= 6) return 'HIGH';
         elseif ($stationaryHours >= 4) return 'MEDIUM';
         else return 'LOW';
-        
-        // Vessel type factor
-        // $type1 = $vessel1['type'] ?? '';
-        // $type2 = $vessel2['type'] ?? '';
-        
-        // if (stripos($type1, 'tanker') !== false && stripos($type2, 'tanker') !== false) {
-        //     $riskScore += 2; // Tanker-to-tanker transfer
-        // }
-        
-        // // Determine risk level
-        // if ($riskScore >= 5) return 'HIGH';
-        // if ($riskScore >= 3) return 'MEDIUM';
-        // return 'LOW';
     }
     
     /**
@@ -149,7 +138,6 @@ class STSTransferDetector {
      * Get zone/terminal name based on position
      */
     public function getZoneTerminalName($lat, $lon) {
-        
         $endpoint = $this->baseUrl . '/port_find';
         $params = [
             'api-key' => $this->apiKey,
@@ -173,7 +161,7 @@ class STSTransferDetector {
         
         $data = json_decode($response, true);
         
-        if( isset( $data['data'] ) && is_array( $data['data'] ) && count( $data['data'] ) > 0 ) {
+        if( isset($data['data']) && is_array($data['data']) && count($data['data']) > 0 ) {
             return $data['data'][0]['port_name'];
         }
         
@@ -240,17 +228,142 @@ class STSTransferDetector {
     }
     
     /**
-     * Determine operation status
+     * Determine operation status based on end conditions
      */
     private function getOperationStatus($analysis) {
         if (!$analysis['sts_detected']) return '';
         
         $stationaryHours = $analysis['stationary_hours'];
         
-        //if ($stationaryHours >= 6) return 'Completed';
+        // Check if transfer has ended based on end date conditions
+        if ($analysis['transfer_ended']) {
+            return 'Completed';
+        }
+        
+        // Check maximum duration cap
+        if ($stationaryHours >= MAX_TRANSFER_HOURS) {
+            return 'Completed (Max Duration)';
+        }
+        
         if ($stationaryHours >= 3) return 'Ongoing';
         
         return 'Detected';
+    }
+    
+    /**
+     * Detect end conditions for STS transfer
+     */
+    private function detectEndConditions($history1, $history2) {
+        $endConditions = [
+            'distance_end' => false,
+            'speed_end' => false,
+            'end_date' => null,
+            'end_reason' => ''
+        ];
+        
+        if (empty($history1) || empty($history2)) {
+            return $endConditions;
+        }
+        
+        // Sort history by timestamp (newest first)
+        usort($history1, function($a, $b) {
+            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
+        });
+        
+        usort($history2, function($a, $b) {
+            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
+        });
+        
+        // Check for distance > 1500m for 20 minutes
+        $distanceExceededDuration = 0;
+        $distanceStartTime = null;
+        
+        // Check for either vessel speed > 1.0kn for 15 minutes
+        $speedExceededDuration1 = 0;
+        $speedExceededDuration2 = 0;
+        $speedStartTime1 = null;
+        $speedStartTime2 = null;
+        
+        // Analyze recent history (last 60 minutes)
+        $checkWindow = 60; // minutes
+        $now = time();
+        
+        for ($i = 0; $i < min(count($history1), count($history2)); $i++) {
+            if (!isset($history1[$i], $history2[$i])) continue;
+            
+            $point1 = $history1[$i];
+            $point2 = $history2[$i];
+            
+            $timestamp = strtotime($point1['last_position_UTC'] ?? 'now');
+            
+            // Only check within the last 60 minutes
+            if ($now - $timestamp > $checkWindow * 60) break;
+            
+            // Check distance condition
+            $distance = $this->calculateDistanceNM(
+                $point1['lat'], $point1['lon'],
+                $point2['lat'], $point2['lon']
+            );
+            
+            if ($distance > END_DISTANCE_NM) {
+                
+                if ($distanceExceededDuration == 0) {
+                    $distanceStartTime = $timestamp;
+                }
+
+                $distanceExceededDuration = ($timestamp - $distanceStartTime) / 60; // Convert to minutes
+                
+                if ($distanceExceededDuration >= END_DURATION_MINUTES) {
+                    $endConditions['distance_end'] = true;
+                    $endConditions['end_date'] = date('Y-m-d\TH:i:s\Z', $timestamp);
+                    $endConditions['end_reason'] = "Vessels separated by >1500m for " . END_DURATION_MINUTES . " minutes";
+                    break;
+                }
+            } else {
+                $distanceExceededDuration = 0;
+                $distanceStartTime = null;
+            }
+            
+            // Check speed condition for vessel 1
+            $speed1 = $point1['speed'] ?? 0;
+            if ($speed1 > END_SPEED_KNOTS) {
+                if ($speedExceededDuration1 == 0) {
+                    $speedStartTime1 = $timestamp;
+                }
+                $speedExceededDuration1 = ($timestamp - $speedStartTime1) / 60; // Convert to minutes
+                
+                if ($speedExceededDuration1 >= END_SPEED_DURATION_MINUTES) {
+                    $endConditions['speed_end'] = true;
+                    $endConditions['end_date'] = date('Y-m-d\TH:i:s\Z', $timestamp);
+                    $endConditions['end_reason'] = "Vessel 1 speed >" . END_SPEED_KNOTS . "kn for " . END_SPEED_DURATION_MINUTES . " minutes";
+                    break;
+                }
+            } else {
+                $speedExceededDuration1 = 0;
+                $speedStartTime1 = null;
+            }
+            
+            // Check speed condition for vessel 2
+            $speed2 = $point2['speed'] ?? 0;
+            if ($speed2 > END_SPEED_KNOTS) {
+                if ($speedExceededDuration2 == 0) {
+                    $speedStartTime2 = $timestamp;
+                }
+                $speedExceededDuration2 = ($timestamp - $speedStartTime2) / 60; // Convert to minutes
+                
+                if ($speedExceededDuration2 >= END_SPEED_DURATION_MINUTES) {
+                    $endConditions['speed_end'] = true;
+                    $endConditions['end_date'] = date('Y-m-d\TH:i:s\Z', $timestamp);
+                    $endConditions['end_reason'] = "Vessel 2 speed >" . END_SPEED_KNOTS . "kn for " . END_SPEED_DURATION_MINUTES . " minutes";
+                    break;
+                }
+            } else {
+                $speedExceededDuration2 = 0;
+                $speedStartTime2 = null;
+            }
+        }
+        
+        return $endConditions;
     }
 
     /**
@@ -263,12 +376,40 @@ class STSTransferDetector {
                 throw new Exception("Could not retrieve vessel information");
             }
             
-            // Get historical data (last 6 hours)
+            // Get historical data (last 24 hours)
             $history1 = $this->getVesselHistory($vessel1['mmsi'], 24);
-            
             $history2 = $this->getVesselHistory($vessel2['mmsi'], 24);
+            
             // Analyze proximity and movement patterns
             $analysis = $this->analyzeVesselBehavior($history1, $history2, $vessel1, $vessel2);
+            
+            // Check for end conditions
+            $endConditions = $this->detectEndConditions($history1, $history2);
+            
+            // If STS was detected but end conditions are met, update analysis
+            if ($analysis['sts_detected'] && ($endConditions['distance_end'] || $endConditions['speed_end'])) {
+                $analysis['transfer_ended'] = true;
+                $analysis['end_date'] = $endConditions['end_date'];
+                $analysis['end_reason'] = $endConditions['end_reason'];
+                
+                // Cap the stationary hours at the end time
+                if ($analysis['end_date']) {
+                    $startTime = strtotime($analysis['start_date']);
+                    $endTime = strtotime($analysis['end_date']);
+                    $transferDurationHours = max(0, ($endTime - $startTime) / 3600);
+                    $analysis['stationary_hours'] = min($analysis['stationary_hours'], $transferDurationHours);
+                }
+            }
+            
+            // Apply maximum transfer duration cap
+            if ($analysis['sts_detected'] && $analysis['stationary_hours'] > MAX_TRANSFER_HOURS) {
+                $analysis['stationary_hours'] = MAX_TRANSFER_HOURS;
+                if (!isset($analysis['transfer_ended'])) {
+                    $analysis['transfer_ended'] = true;
+                    $analysis['end_date'] = date('Y-m-d\TH:i:s\Z', strtotime($analysis['start_date']) + (MAX_TRANSFER_HOURS * 3600));
+                    $analysis['end_reason'] = "Maximum transfer duration (" . MAX_TRANSFER_HOURS . " hours) reached";
+                }
+            }
             
             // Generate STS report
             $stsReport = $this->generateSTSReport($analysis, $vessel1, $vessel2);
@@ -282,65 +423,7 @@ class STSTransferDetector {
             ];
         }
     }
-   
-    /**
-     * Detect end conditions for STS transfer
-     */
-    private function detectEndConditions($history1, $history2) {
-       
-        if (empty($history1) || empty($history2)) {
-            echo date('Y-m-d H:i:s');
-        }
-        
-        // Sort history by timestamp (newest first)
-        usort($history1, function($a, $b) {
-            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
-        });
-        
-        usort($history2, function($a, $b) {
-            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
-        });
-        
-        // Analyze recent history (last 60 minutes)
-        $end_time1 = 0;
-        $end_time2 = 0;
-        for ($i = count($history1)-1; $i > 0; $i--) {
-            
-            $point1 = $history1[$i];
-            $point2 = $history1[$i-1];
-
-            $timestamp1 = strtotime( $point1[ 'last_position_UTC' ] ?? 'now' );
-            $timestamp2 = strtotime( $point2[ 'last_position_UTC' ] ?? 'now' );
-
-            $distanceExceededDuration = ($timestamp2 - $timestamp1) / 60; // Convert to minutes
-           
-            if ( intval( $distanceExceededDuration ) >= intval( ALLOWED_STS_END_DURATION_MINUTES ) ) {
-                $end_time1 = date('Y-m-d\TH:i:s\Z', $timestamp1);
-            }
-        }
-
-        for ($i = count($history2)-1; $i > 0; $i--) {
-            
-            $point1 = $history2[$i];
-            $point2 = $history2[$i-1];
-
-            $timestamp1 = strtotime( $point1[ 'last_position_UTC' ] ?? 'now' );
-            $timestamp2 = strtotime( $point2[ 'last_position_UTC' ] ?? 'now' );
-
-            $distanceExceededDuration = ($timestamp2 - $timestamp1) / 60; // Convert to minutes
-           
-            if ( intval( $distanceExceededDuration ) >= intval( ALLOWED_STS_END_DURATION_MINUTES ) ) {
-                $end_time2 = date('Y-m-d\TH:i:s\Z', $timestamp1);
-            }
-        }
-        if( strtotime( $end_time1 ) > strtotime( $end_time2 ) ) {
-            return $end_time1;
-        } else{
-            return $end_time2;
-        }
-        
-    }
-
+    
     /**
      * Analyze vessel behavior for STS patterns
      */
@@ -350,11 +433,12 @@ class STSTransferDetector {
             'stationary_hours' => 0,
             'lock_time' => '',
             'start_date' => '',
-            'end_date' => '',
-            'distance' => '',
             'proximity_consistency' => 0,
             'data_points_analyzed' => min(count($history1), count($history2)),
-            'sts_detected' => false
+            'sts_detected' => false,
+            'transfer_ended' => false,
+            'end_date' => null,
+            'end_reason' => ''
         ];
         
         if (empty($history1) || empty($history2)) {
@@ -370,14 +454,10 @@ class STSTransferDetector {
         $closeProximityCount = 0;
         $stationaryCount = 0;
         $totalComparisons = 0;
-        echo '<br>end_date initial:'.$end_date = $this->detectEndConditions($history1['positions'], $history2['positions']);
-        $analysis['end_date'] = $end_date;
-
-        //echo '<pre>';print_r($history1['positions']);print_r($history2['positions']);
-        foreach ($history1['positions'] as $point1) {
-            foreach ($history2['positions'] as $point2) {
+        
+        foreach ($history1 as $point1) {
+            foreach ($history2 as $point2) {
                 // Compare points within 10 minutes of each other
-                
                 if (is_array($point1) && is_array($point2)) {
                     $timeDiff = abs(strtotime($point1['last_position_epoch'] ?? 0) - strtotime($point2['last_position_epoch'] ?? 0));
                     
@@ -387,16 +467,18 @@ class STSTransferDetector {
                             $point2['lat'], $point2['lon']
                         );
                         
+                        if(empty($analysis['start_date']) && $distance <= ALLOWED_STS_RANGE_NM) {
+                            $analysis['start_date'] = $point1['last_position_UTC'];
+                        } 
+
                         $analysis['lock_time'] = $point2['last_position_epoch'];
                         $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
                         $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
                         
                         if ($distance <= ALLOWED_STS_RANGE_NM) {
                             $closeProximityCount++;
-                            $analysis['start_date'] = $point1['last_position_UTC']; 
                         }
                         
-                        $analysis['distance'] = $distance; 
                         if ($isStationary1 && $isStationary2) {
                             $stationaryCount++;
                         }
@@ -413,13 +495,8 @@ class STSTransferDetector {
             $analysis['stationary_ratio'] = $stationaryCount / $totalComparisons;
             
             // Estimate stationary hours (simplified)
-            $analysis['stationary_hours'] = round($analysis['stationary_ratio'] * 6, 1);
+            $analysis['stationary_hours'] = round($analysis['stationary_ratio'] * 24, 1);
             
-            if ($analysis['stationary_hours'] > ALLOWED_STS_MAX_TRANSFER_HOURS) {
-                $analysis['stationary_hours'] = ALLOWED_STS_MAX_TRANSFER_HOURS;
-                $analysis['end_date'] = date('Y-m-d\TH:i:s\Z', strtotime($analysis['start_date']) + (ALLOWED_STS_MAX_TRANSFER_HOURS * 3600));
-            }
-
             // Detect STS based on criteria
             $analysis['sts_detected'] = (
                 $analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM &&
@@ -451,12 +528,6 @@ class STSTransferDetector {
             $analysis['stationary_hours']
         );
         
-        // Get additional required fields
-        // $zoneTerminalName = $this->getZoneTerminalName(
-        //     $vessel1['position']['lat'] ?? 0,
-        //     $vessel1['position']['lon'] ?? 0
-        // );
-        
         $vesselCondition1 = $this->getVesselCondition($vessel1);
         $vesselCondition2 = $this->getVesselCondition($vessel2);
         
@@ -471,9 +542,8 @@ class STSTransferDetector {
         
         $remarks = $this->generateRemarks($analysis, $vessel1, $vessel2, $cargoType1, $cargoType2);
         
-        return [
+        $report = [
             'sts_transfer_detected' => $analysis['sts_detected'],
-            // 'zone_terminal_name' => $zoneTerminalName,
             'operation_mode' => $operationMode,
             'status' => $operationStatus,
             'vessel_1' => [
@@ -499,18 +569,21 @@ class STSTransferDetector {
             'proximity_analysis' => [
                 'current_distance_nm' => round($analysis['current_distance_nm'], 3),
                 'stationary_duration_hours' => $analysis['stationary_hours'],
-                'proximity_consistency' => number_format(round($analysis['proximity_consistency'] * 100, 1), 2,'.', '') . '%',
+                'proximity_consistency' => number_format(round($analysis['proximity_consistency'] * 100, 1), 2, '.', '') . '%',
                 'data_points_analyzed' => $analysis['data_points_analyzed']
             ],
             'risk_assessment' => [
                 'risk_level' => $riskLevel,
-                'confidence' => number_format($confidence, 2,'.', ''),
+                'confidence' => number_format($confidence, 2, '.', ''),
                 'remarks' => $remarks
             ],
-            'lock_time' => $analysis['lock_time'],
-            'start_date' => empty($analysis['start_date'])?date('Y-m-d H:i:s'):$analysis['start_date'],
-            'distance' => $analysis['distance'],
-            'end_date' => $analysis['end_date'],
+            'transfer_timeline' => [
+                'lock_time' => $analysis['lock_time'],
+                'start_date' => $analysis['start_date'],
+                'end_date' => $analysis['end_date'] ?? null,
+                'end_reason' => $analysis['end_reason'] ?? null,
+                'transfer_ended' => $analysis['transfer_ended'] ?? false
+            ],
             'timestamp' => date('c'),
             'criteria_met' => [
                 'distance_≤_200_m' => $analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM,
@@ -518,6 +591,8 @@ class STSTransferDetector {
                 'consistent_proximity' => $analysis['proximity_consistency'] >= 0.7
             ]
         ];
+        
+        return $report;
     }
     
     /**
@@ -558,7 +633,14 @@ class STSTransferDetector {
         $remarks = [];
         
         if ($analysis['sts_detected']) {
-            $remarks[] = "STS TRANSFER LIKELY IN PROGRESS";
+            if ($analysis['transfer_ended']) {
+                $remarks[] = "STS TRANSFER COMPLETED";
+                if ($analysis['end_reason']) {
+                    $remarks[] = $analysis['end_reason'];
+                }
+            } else {
+                $remarks[] = "STS TRANSFER LIKELY IN PROGRESS";
+            }
         }
         
         if ($analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM) {
@@ -568,7 +650,11 @@ class STSTransferDetector {
         }
         
         if ($analysis['stationary_hours'] >= 5) {
-            $remarks[] = "Extended stationary period suggests transfer operations";
+            if ($analysis['stationary_hours'] >= MAX_TRANSFER_HOURS) {
+                $remarks[] = "Maximum transfer duration reached";
+            } else {
+                $remarks[] = "Extended stationary period suggests transfer operations";
+            }
         }
         
         if ($cargo1 === 'Crude Oil' && $cargo2 === 'Crude Oil') {
@@ -582,14 +668,3 @@ class STSTransferDetector {
         return implode('. ', $remarks);
     }
 }
-
-// // Usage
-// $apiKey = '15df4420-d28b-4b26-9f01-13cca621d55e';
-// $detector = new STSTransferDetector($apiKey);   
-
-// // Check for STS transfer between two vessels
-// $result = $detector->detectSTSTransfer('123456789', '987654321');
-
-// echo "<pre>";
-// print_r($result);
-// echo "</pre>";

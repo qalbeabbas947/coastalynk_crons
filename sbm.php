@@ -187,9 +187,8 @@ if ($result = $mysqli -> query($sql)) {
     $table_name_sbm = $table_prefix . 'coastalynk_sbm';
 
     // Create table if not exists
-    $sql = "CREATE TABLE IF NOT EXISTS $table_name_sbm (
+   echo  $sql = "CREATE TABLE IF NOT EXISTS $table_name_sbm (
         id INT AUTO_INCREMENT,
-        
         uuid VARCHAR(50) default '',
         name VARCHAR(255) default '',
         mmsi VARCHAR(50) default '',
@@ -210,31 +209,20 @@ if ($result = $mysqli -> query($sql)) {
         distance float default 0,
         event_ref_id VARCHAR(30) default '',
         zone_terminal_name VARCHAR(30) default '',
-        start_date TIMESTAMP default '',
-        end_date TIMESTAMP default '',
-        remarks VARCHAR(255) default '',
-        condition VARCHAR(15) default '',
-        event_percentage float default 0,
-        cargo_eta float default 0,
-        vessel_owner VARCHAR(255) default '',
-        cargo_category_type  VARCHAR(255) default '',
+        start_date TIMESTAMP null default null,
+        end_date TIMESTAMP null default null,
+        remarks VARCHAR(255) null default '',
+        `condition` VARCHAR(15) null default '',
+        event_percentage float null default 0,
+        cargo_eta float null default 0,
+        vessel_owner VARCHAR(255) null default '',
+        cargo_category_type  VARCHAR(255) null default '',
         is_offloaded ENUM('No','Yes') NOT NULL DEFAULT 'No',
         is_start_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
         is_complete_email_sent ENUM('No','Yes') NOT NULL DEFAULT 'No',
-        last_updated TIMESTAMP,
+        last_updated TIMESTAMP null default null,
         PRIMARY KEY (id)
     )";
-
-
-Zone/Terminal name + centroid coordinates.
-Vessel(s) name, IMO, MMSI, Flag, Type, Type_Specific, Owner/Manager.
-Draught Before / After (+ Diff).
-Cargo Category and Grade (Crude, PMS, AGO, LPG etc.).
-Origin / Destination port, ETA.
-Operation Mode (Loading/Discharge/STS).
-Status (Ongoing/Completed/Historical).
-Reference ID and optional Audit Trail link.
-
 
 
     if ($mysqli->query($sql) !== TRUE) {
@@ -246,7 +234,7 @@ Reference ID and optional Audit Trail link.
     $array_uidds = [];
     while ( $obj = $result->fetch_object() ) {
         foreach( $types as $type ) {
-
+            sleep(3);
             $url = sprintf(
                 "https://api.datalastic.com/api/v0/vessel_inradius?api-key=%s&lat=%f&lon=%f&radius=%f&type=%s",
                 urlencode($api_key),
@@ -271,8 +259,8 @@ Reference ID and optional Audit Trail link.
                     
                     if( $num_rows == 0 ) {
 
-                            $navigation_status = get_datalastic_field($v1['uuid']);
-                            $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
+                            $navigation_status = get_datalastic_field($v1['uuid'], 'current_draught', false);
+                            $current_draught = get_datalastic_field($v1['uuid'], 'current_draught', false);
                             $dist = haversineDistance($v1['lat'], $v1['lon'], $obj->lat, $obj->lon);
                             $sql = "INSERT INTO $table_name_sbm (uuid , name, mmsi, imo, country_iso, type, type_specific, lat, lon,speed,navigation_status, draught, last_position_UTC, distance, port, port_id, port_type, last_updated,start_date)
                             VALUES (
@@ -402,7 +390,7 @@ Reference ID and optional Audit Trail link.
     if( $num_rows > 0 ) {
 
         while ( $v1 = mysqli_fetch_assoc($result3) ) {
-            $current_draught = get_datalastic_field($v1['uuid'], 'current_draught');
+            $current_draught = get_datalastic_field($v1['uuid'], 'current_draught', false);
             $sql = "update ".$table_name_sbm." set is_offloaded='Yes', completed_draught='".$current_draught."' where id = '".$v1['id']."'";
             $mysqli->query($sql);
             
