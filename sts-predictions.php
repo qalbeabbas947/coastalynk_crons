@@ -289,10 +289,13 @@ class STSTransferDetector {
     private function detectEndConditions($history1, $history2) {
        
         if (empty($history1) || empty($history2)) {
-            echo date('Y-m-d H:i:s');
+            return null;
         }
         
-        // Sort history by timestamp (newest first)
+        // Find when vessels start moving away from each other
+        $endTime = null;
+        
+        // Sort by timestamp (newest first)
         usort($history1, function($a, $b) {
             return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
         });
@@ -301,44 +304,61 @@ class STSTransferDetector {
             return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
         });
         
-        // Analyze recent history (last 60 minutes)
-        $end_time1 = 0;
-        $end_time2 = 0;
-        for ($i = count($history1)-1; $i > 0; $i--) {
+        // Check for movement or distance increase
+        for ($i = 0; $i < min(count($history1), count($history2)) - 1; $i++) {
+            $current1 = $history1[$i];
+            $current2 = $history2[$i];
+            $next1 = $history1[$i + 1];
+            $next2 = $history2[$i + 1];
             
-            $point1 = $history1[$i];
-            $point2 = $history1[$i-1];
-
-            $timestamp1 = strtotime( $point1[ 'last_position_UTC' ] ?? 'now' );
-            $timestamp2 = strtotime( $point2[ 'last_position_UTC' ] ?? 'now' );
-
-            $distanceExceededDuration = ($timestamp2 - $timestamp1) / 60; // Convert to minutes
-           
-            if ( intval( $distanceExceededDuration ) >= intval( ALLOWED_STS_END_DURATION_MINUTES ) ) {
-                $end_time1 = date('Y-m-d\TH:i:s\Z', $timestamp1);
-            }
-        }
-
-        for ($i = count($history2)-1; $i > 0; $i--) {
+            $currentDistance = $this->calculateDistanceNM(
+                $current1['lat'], $current1['lon'],
+                $current2['lat'], $current2['lon']
+            );
             
-            $point1 = $history2[$i];
-            $point2 = $history2[$i-1];
-
-            $timestamp1 = strtotime( $point1[ 'last_position_UTC' ] ?? 'now' );
-            $timestamp2 = strtotime( $point2[ 'last_position_UTC' ] ?? 'now' );
-
-            $distanceExceededDuration = ($timestamp2 - $timestamp1) / 60; // Convert to minutes
-           
-            if ( intval( $distanceExceededDuration ) >= intval( ALLOWED_STS_END_DURATION_MINUTES ) ) {
-                $end_time2 = date('Y-m-d\TH:i:s\Z', $timestamp1);
+            $nextDistance = $this->calculateDistanceNM(
+                $next1['lat'], $next1['lon'],
+                $next2['lat'], $next2['lon']
+            );
+            
+            // Check if vessels are moving apart
+            if ($nextDistance > $currentDistance + 0.1) { // Increased by more than 0.1 NM
+                $endTime = $next1['last_position_UTC'];
+                break;
             }
-        }
-        if( strtotime( $end_time1 ) > strtotime( $end_time2 ) ) {
-            return $end_time1;
-        } else{
-            return $end_time2;
+            
+            // Check if either vessel starts moving
+            $currentSpeedAvg = (($current1['speed'] ?? 0) + ($current2['speed'] ?? 0)) / 2;
+            $nextSpeedAvg = (($next1['speed'] ?? 0) + ($next2['speed'] ?? 0)) / 2;
+            
+            if ($currentSpeedAvg < 1 && $nextSpeedAvg >= 1) {
+                $endTime = $next1['last_position_UTC'];
+                break;
+            }
         }
         
+        return $endTime;
+        
+    }
+
+    private function findSTSTransferPeriod($stationaryPeriods) {
+        // Find the longest stationary period
+        $longestPeriod = null;
+        $maxDuration = 0;
+        
+        foreach ($stationaryPeriods as $period) {
+            if ($period['duration_hours'] > $maxDuration) {
+                $maxDuration = $period['duration_hours'];
+                $longestPeriod = $period;
+            }
+        }
+        
+        // Check if it meets STS criteria
+        if ($longestPeriod && $longestPeriod['duration_hours'] >= 6) {
+            return $longestPeriod;
+        }
+        
+        return null;
     }
 
     /**
@@ -354,7 +374,8 @@ class STSTransferDetector {
             'distance' => '',
             'proximity_consistency' => 0,
             'data_points_analyzed' => min(count($history1), count($history2)),
-            'sts_detected' => false
+            'sts_detected' => false,
+            'stationary_periods' => []
         ];
         
         if (empty($history1) || empty($history2)) {
@@ -362,22 +383,34 @@ class STSTransferDetector {
         }
         
         $analysis['current_distance_nm'] = $this->calculateDistanceNM(
-                $vessel1['lat'], $vessel1['lon'],
-                $vessel2['lat'], $vessel2['lon']
-            );
-       
-        // Analyze historical proximity and movement
+            $vessel1['lat'], $vessel1['lon'],
+            $vessel2['lat'], $vessel2['lon']
+        );
+        
+        // Calculate stationary hours properly
+        $stationaryAnalysis = $this->calculateStationaryHours(
+            $history1['positions'] ?? [],
+            $history2['positions'] ?? []
+        );
+        
+        $analysis['stationary_hours'] = $stationaryAnalysis['total_stationary_hours'];
+        $analysis['stationary_periods'] = $stationaryAnalysis['stationary_periods'];
+        
+        // Find STS transfer period
+        $stsPeriod = $this->findSTSTransferPeriod($analysis['stationary_periods']);
+        
+        if ($stsPeriod) {
+            $analysis['start_date'] = $stsPeriod['start'];
+            $analysis['end_date'] = $stsPeriod['end'];
+            $analysis['lock_time'] = $stsPeriod['start'];
+        }
+        
+        // Analyze proximity consistency
         $closeProximityCount = 0;
-        $stationaryCount = 0;
         $totalComparisons = 0;
-        echo '<br>end_date initial:'.$end_date = $this->detectEndConditions($history1['positions'], $history2['positions']);
-        $analysis['end_date'] = $end_date;
-
-        //echo '<pre>';print_r($history1['positions']);print_r($history2['positions']);
+        
         foreach ($history1['positions'] as $point1) {
             foreach ($history2['positions'] as $point2) {
-                // Compare points within 10 minutes of each other
-                
                 if (is_array($point1) && is_array($point2)) {
                     $timeDiff = abs(strtotime($point1['last_position_epoch'] ?? 0) - strtotime($point2['last_position_epoch'] ?? 0));
                     
@@ -387,40 +420,31 @@ class STSTransferDetector {
                             $point2['lat'], $point2['lon']
                         );
                         
-                        $analysis['lock_time'] = $point2['last_position_epoch'];
-                        $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
-                        $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
-                        
                         if ($distance <= ALLOWED_STS_RANGE_NM) {
                             $closeProximityCount++;
-                            $analysis['start_date'] = $point1['last_position_UTC']; 
+                            
+                            // Set start date if not already set
+                            if (empty($analysis['start_date'])) {
+                                $analysis['start_date'] = $point1['last_position_UTC'];
+                                $analysis['lock_time'] = $point2['last_position_epoch'];
+                            }
                         }
                         
                         $analysis['distance'] = $distance; 
-                        if ($isStationary1 && $isStationary2) {
-                            $stationaryCount++;
-                        }
-                        
                         $totalComparisons++;
                     }
                 }
             }
         }
         
-        // Calculate metrics
+        // Calculate proximity consistency
         if ($totalComparisons > 0) {
             $analysis['proximity_consistency'] = $closeProximityCount / $totalComparisons;
-            $analysis['stationary_ratio'] = $stationaryCount / $totalComparisons;
-            
-            // Estimate stationary hours (simplified)
-            $analysis['stationary_hours'] = round($analysis['stationary_ratio'] * 6, 1);
-            
             if ($analysis['stationary_hours'] > ALLOWED_STS_MAX_TRANSFER_HOURS) {
-                $analysis['stationary_hours'] = ALLOWED_STS_MAX_TRANSFER_HOURS;
+                //$analysis['stationary_hours'] = ALLOWED_STS_MAX_TRANSFER_HOURS;
                 $analysis['end_date'] = date('Y-m-d\TH:i:s\Z', strtotime($analysis['start_date']) + (ALLOWED_STS_MAX_TRANSFER_HOURS * 3600));
             }
-
-            // Detect STS based on criteria
+            // Detect STS
             $analysis['sts_detected'] = (
                 $analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM &&
                 $analysis['stationary_hours'] >= 6 &&
@@ -431,6 +455,91 @@ class STSTransferDetector {
         return $analysis;
     }
 
+    private function calculateStationaryHours($history1, $history2, $startDate = null, $endDate = null) {
+        $stationaryPeriods = [];
+        
+        // Filter data points within the specified time range
+        if ($startDate && $endDate) {
+            $history1 = array_filter($history1, function($point) use ($startDate, $endDate) {
+                $pointTime = strtotime($point['last_position_UTC'] ?? 0);
+                return $pointTime >= strtotime($startDate) && $pointTime <= strtotime($endDate);
+            });
+            
+            $history2 = array_filter($history2, function($point) use ($startDate, $endDate) {
+                $pointTime = strtotime($point['last_position_UTC'] ?? 0);
+                return $pointTime >= strtotime($startDate) && $pointTime <= strtotime($endDate);
+            });
+        }
+        
+        // Sort by timestamp
+        usort($history1, function($a, $b) {
+            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+        });
+        
+        usort($history2, function($a, $b) {
+            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+        });
+        
+        // Group timestamps where both vessels are stationary
+        $stationaryStart = null;
+        $stationaryDuration = 0;
+        
+        $minPoints = min(count($history1), count($history2));
+        
+        for ($i = 0; $i < $minPoints; $i++) {
+            $point1 = $history1[$i];
+            $point2 = $history2[$i];
+            
+            // Check if both vessels are stationary
+            $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
+            $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
+            
+            if ($isStationary1 && $isStationary2) {
+                if ($stationaryStart === null) {
+                    $stationaryStart = strtotime($point1['last_position_UTC']);
+                }
+            } else {
+                if ($stationaryStart !== null) {
+                    $stationaryEnd = strtotime($point1['last_position_UTC']);
+                    $duration = ($stationaryEnd - $stationaryStart) / 3600; // Convert to hours
+                    
+                    if ($duration >= 0.5) { // Consider periods of at least 30 minutes
+                        $stationaryPeriods[] = [
+                            'start' => date('Y-m-d H:i:s', $stationaryStart),
+                            'end' => date('Y-m-d H:i:s', $stationaryEnd),
+                            'duration_hours' => round($duration, 2)
+                        ];
+                    }
+                    
+                    $stationaryStart = null;
+                }
+            }
+        }
+        
+        // If still stationary at the end
+        if ($stationaryStart !== null && $minPoints > 0) {
+            $lastPoint = $history1[$minPoints - 1];
+            $stationaryEnd = strtotime($lastPoint['last_position_UTC']);
+            $duration = ($stationaryEnd - $stationaryStart) / 3600;
+            
+            if ($duration >= 0.5) {
+                $stationaryPeriods[] = [
+                    'start' => date('Y-m-d H:i:s', $stationaryStart),
+                    'end' => date('Y-m-d H:i:s', $stationaryEnd),
+                    'duration_hours' => round($duration, 2)
+                ];
+            }
+        }
+        
+        // Calculate total stationary hours
+        $totalStationaryHours = array_sum(array_column($stationaryPeriods, 'duration_hours'));
+        
+        return [
+            'total_stationary_hours' => $totalStationaryHours,
+            'stationary_periods' => $stationaryPeriods,
+            'period_count' => count($stationaryPeriods)
+        ];
+    }
     /**
      * Generate comprehensive STS report
      */

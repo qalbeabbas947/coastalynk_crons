@@ -549,8 +549,8 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
 
                         if ($at_event_creation_close_distance && $at_event_creation_allowed_speed && $at_event_creation_allowed_heading) {
                             
-                            $detectresult = $detector->detectSTSTransfer($v1, $v2);echo '<pre>1';print_r($detectresult);echo '</pre>';
-                            //echo '<pre>'.$v1['mmsi'].'-------'.$v2['mmsi'];print_r($detectresult);echo '</pre>';
+                            $detectresult = $detector->detectSTSTransfer($v1, $v2);
+                            //echo '<pre>';print_r($detectresult);echo '</pre>'; 
                             $vessel_array[$v1['mmsi']]['start_date'] = $detectresult['start_date'];
                             $stationary_duration_hours  = $detectresult['proximity_analysis']['stationary_duration_hours'];
                             $stationary_duration_mins = (floatval( $stationary_duration_hours)*60);
@@ -625,20 +625,10 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     if( $mother_ship['mmsi'] != $mmsi ) {
                         $vehicel_1 = $cached_data[$mother_ship['mmsi']];
                         $vehicel_2 = $cached_data[$mmsi];
-
-                        $child_start = date( 'Y-m-d H:i:s', strtotime($vessel_data['start_date']));
-
-                        if( empty( $start_date_m ) ) {
-                            $start_date_m = $child_start;
-                        } else if( strtotime( $start_date_m ) > strtotime( $child_start ) ) {
-                            $start_date_m = $child_start;
-                        } else {
-                            $start_date_m = date('Y-m-d H:i:s');
-                        }
-
-                       //echo '<br>'.$mother_ship['mmsi'].'-'.$mmsi.' = '.($mother_ship['mmsi']==$mmsi?'equal':'not_equal');print_r($vessel_data);
-                        $detectresult = $detector->detectSTSTransfer($vehicel_1, $vehicel_2);echo '<pre>3';print_r($detectresult);echo '</pre>';
                         
+                       //echo '<br>'.$mother_ship['mmsi'].'-'.$mmsi.' = '.($mother_ship['mmsi']==$mmsi?'equal':'not_equal');print_r($vessel_data);
+                        $detectresult = $detector->detectSTSTransfer($vehicel_1, $vehicel_2);
+                        //echo '<pre>';print_r($detectresult);echo '</pre>'; 
                        // if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) 
                         {
                             if( $event_id == 0 ) {
@@ -751,12 +741,36 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $risk_level     = $detectresult['risk_assessment']['risk_level'];
 
                             $remarks        = $detectresult['risk_assessment']['remarks'];
+                            $confidence     = $detectresult['risk_assessment']['confidence'];
                             $lock_time      = $detectresult['lock_time'];
-                            if( $lock_time != '' ) {
-                                $lock_time = "'".date('Y-m-d H:i:s', $detectresult['lock_time'])."'";
+                            if( $lock_time != '' && ! empty( $detectresult['lock_time'] ) ) {
+                                $dateTime = new DateTime($detectresult['lock_time']);
+                                $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+                                $lock_time = "'".$mysqlDate."'";
                             } else {
                                 $lock_time = 'Null';
                             }
+
+                            $start_date_d      = $detectresult['start_date'];
+                            if( $start_date_d != '' && ! empty( $detectresult['start_date'] ) ) {
+                                $dateTime = new DateTime($detectresult['start_date']);
+                                $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+                                $start_date_d = $mysqlDate;
+                            } else {
+                                $start_date_d = date('Y-m-d H:i:s');
+                            }
+
+                            $dateTime = new DateTime($vessel_data['start_date']);
+                            $child_start = $dateTime->format('Y-m-d H:i:s');
+                            
+                            if( empty( $start_date_m ) ) {
+                                $start_date_m = $child_start;
+                            } else if( strtotime( $start_date_m ) > strtotime( $child_start ) ) {
+                                $start_date_m = $child_start;
+                            } else {
+                                $start_date_m = date('Y-m-d H:i:s');
+                            }
+                        
                             $timestamp      = $detectresult['timestamp'];
                             $operation_mode = $detectresult['operation_mode']; 
                             $predicted_cargo_1 = $detectresult['vessel_1']['predicted_cargo'];
@@ -764,8 +778,9 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $status = $detectresult['status']; 
                             $status = 'Detected';
                             if( $event_id == 0 ) {
-                                
-                                echo '<br>Mother Query:  '.$sql = "INSERT INTO $event_table_mother (
+                                $dateTime = new DateTime($vehicel_1['last_position_UTC']);
+                                $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+                                $sql = "INSERT INTO $event_table_mother (
                                             `uuid`,`name`,`mmsi`,`imo`,`country_iso`,`type`,`type_specific`,`lat` ,
                                             `lon` ,`speed` ,`navigation_status`,`draught`,
                                             `last_position_UTC`, `deadweight`, `gross_tonnage`, `port` ,
@@ -785,7 +800,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             '" . floatval($vehicel_1['speed']) . "',
                                             '" . $v1_navigation_status . "',
                                             '" . $v1_current_draught . "',
-                                            '" . date('Y-m-d H:i:s', strtotime($vehicel_1['last_position_UTC'])) . "',
+                                            '" . $mysqlDate . "',
                                             '" . $vessel1_deadweight . "',      
                                             '" . $vessel1_gross_tonnage . "',  
                                             '" . $mysqli->real_escape_string( $port_name ) . "',
@@ -814,7 +829,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 
                             } else if( $daughter_id > 0 && $event_id > 0) {  //
 
-                                echo '<br>Mother Update Query:  '.$sql = "Update $event_table_mother set
+                                $sql = "Update $event_table_mother set
                                             `lat`='".$vehicel_1['lat']."',
                                             `lon`='".$vehicel_1['lon']."',
                                             `speed`='".floatval($vehicel_1['speed'])."',
@@ -841,8 +856,9 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                     if( floatval( $stationary_duration_hours ) >= 6 ) {
                                         $daughter_status = 'active';
                                     }
-
-                                    echo '<br>Daughter Query:  '.$sql = "INSERT INTO $event_table_daughter (
+                                    $dateTime = new DateTime($vehicel_2['last_position_UTC']);
+                                    $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+                                    $sql = "INSERT INTO $event_table_daughter (
                                         `event_id`,`uuid`,`name`,`mmsi`,`imo`,`country_iso`,`type`,`type_specific`,`lat`,
                                         `lon`,`speed`,`navigation_status`,`draught`,`last_position_UTC`,
                                         `ais_signal`,`deadweight`,`gross_tonnage`,distance, latest_distance, last_updated, remarks, event_percentage, cargo_category_type, `risk_level`, `stationary_duration_hours`, `proximity_consistency`, `data_points_analyzed`, `operationmode`, `status`, step, joining_date, lock_time )
@@ -860,7 +876,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '" . floatval($vehicel_2['speed']) . "',
                                         '" . $v2_navigation_status . "',
                                         '" . $v2_current_draught . "',
-                                        '" . date('Y-m-d H:i:s', strtotime($vehicel_2['last_position_UTC'])) . "',
+                                        '" . $mysqlDate . "',
                                         'AIS  Consistent Signal Detected',
                                         '$vessel2_deadweight',
                                         '$vessel2_gross_tonnage',
@@ -877,15 +893,16 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$operation_mode."',
                                         '".$daughter_status."', 
                                         0,
-                                        '".$start_date_m."',
+                                        '".$start_date_d."',
                                         ".$lock_time."
                                         )";
-                                    coastalynk_log_entry($insert_id, $sql, 'd query');
+                                    
                                     if ($mysqli->query( $sql ) !== TRUE) {
                                         echo "Error: " . $sql . "\n" . $mysqli->error;
                                     } else {
                                         
                                         $insert_id = $mysqli->insert_id;
+                                        coastalynk_log_entry($insert_id, $sql, 'd query');
                                         if( !in_array( $insert_id, $array_daughter_ids ) ) {
                                             $array_daughter_ids[] = $insert_id;
                                         }
@@ -1003,7 +1020,10 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             $daughter_status = 'active';
                                         }
 
-                                       echo '<br>Daughter Update Query:  '.$sql = "Update $event_table_daughter set
+                                        $dateTime = new DateTime($vehicel_2['last_position_UTC']);
+                                        $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+
+                                        $sql = "Update $event_table_daughter set
                                             `event_id`='".$event_id."',
                                             `uuid`='".$vehicel_2['uuid']."',
                                             `name`='".$vehicel_2['name']."',
@@ -1017,7 +1037,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `speed`='".floatval($vehicel_2['speed'])."',
                                             `navigation_status`='".$v2_navigation_status."',
                                             `draught`='".$v2_current_draught."',
-                                            `last_position_UTC`='".date('Y-m-d H:i:s', strtotime($vehicel_2['last_position_UTC']))."',
+                                            `last_position_UTC`='".$mysqlDate."',
                                             `ais_signal`='AIS  Consistent Signal Detected',
                                             `deadweight`='".$vessel2_deadweight."',
                                             `gross_tonnage`='".$vessel2_gross_tonnage."',
@@ -1035,7 +1055,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `status`='".$daughter_status."',
                                             `step`='0',`flag_status`='',`outcome_status`='',is_complete = 'No',
                                             end_date = Null,is_disappeared = 'No',
-                                            `joining_date`='".$start_date_m."',
+                                            `joining_date`='".$start_date_d."',
                                             `lock_time`=".$lock_time." where id='".$row['id']."'";
 
                                         coastalynk_log_entry($row['id'], $sql, 'd query');
@@ -1391,14 +1411,14 @@ function process_complete_sts_vessels( $row, $passed_end_date = '' ) {
         $log .= ', Vessel 2 Signal: '.$vessel2_signal;
         $log .= ', Event Desc: '.$event_desc;
 
-        $detectresult = $detector->detectSTSTransfer($v1, $v2);echo '<pre>1';print_r($detectresult);echo '</pre>';
-                                        
+        $detectresult = $detector->detectSTSTransfer($v1, $v2);
+        //echo '<pre>';print_r($detectresult);echo '</pre>';                                
         $end_date = 'Now()';
         if( !empty( $detectresult['end_date'] ) ) {
             $end_date = "'".date('Y-m-d H:i:s', strtotime($detectresult['end_date']))."'";
         }
 
-        echo '<br>'. $sql = "update ".$event_table_daughter." set step = 1, draught_change = '".$draught_diff."', status = 'ended',outcome_status = '".$outcome_status."',operationmode = '".$current_status."',event_desc = '".$event_desc."',is_complete = 'Yes', ais_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', completed_draught = '".floatval( $v2_current_draught)."', end_date = ".$end_date.", last_updated = NOW() where id='".$row['did']."'";
+        $sql = "update ".$event_table_daughter." set step = 1, draught_change = '".$draught_diff."', status = 'ended',outcome_status = '".$outcome_status."',operationmode = '".$current_status."',event_desc = '".$event_desc."',is_complete = 'Yes', ais_signal = '".$vessel2_signal."', estimated_cargo = '".$estimated_cargo."', completed_draught = '".floatval( $v2_current_draught)."', end_date = ".$end_date.", last_updated = NOW() where id='".$row['did']."'";
         $mysqli->query($sql);
         
         coastalynk_log_entry($row['did'], $sql, 'bottom d query');
@@ -1415,7 +1435,7 @@ function process_complete_sts_vessels( $row, $passed_end_date = '' ) {
                 $end_date = "'".$end_date_row['end_date']."'";
             }
 
-            echo $sql = "update ".$event_table_mother." set is_complete = 'Yes', status = 'Completed',ais_signal = '".$vessel1_signal."', completed_draught = '".floatval( $v1_current_draught )."', end_date = ".$end_date.", last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
+            $sql = "update ".$event_table_mother." set is_complete = 'Yes', status = 'Completed',ais_signal = '".$vessel1_signal."', completed_draught = '".floatval( $v1_current_draught )."', end_date = ".$end_date.", last_updated = NOW() where is_complete='No' and id='".$row['id']."'";
             $mysqli->query($sql);
             coastalynk_log_entry($row['id'], $sql, 'bottom m query');
         }
