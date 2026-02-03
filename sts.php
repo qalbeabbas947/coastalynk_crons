@@ -310,6 +310,8 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_daughter."` (
   `outcome_status` varchar(30)  NULL DEFAULT '',
   `flag_status` varchar(30)  NULL DEFAULT '',
   `step` TINYINT(1) NOT NULL DEFAULT '0',
+  `transfer_status` VARCHAR(50) NULL,
+  `transfer_confidence` ENUM('Low', 'Medium','High') NULL DEFAULT 'Low',
    PRIMARY KEY (id)
 )";
 
@@ -432,7 +434,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                     $new_entry = false;
                     $row = false;
 
-                    $sql = "SELECT e.id, d.id as did, e.status from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v2['uuid'])."') or (e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v1['uuid'])."') and e.is_disappeared = 'No'";
+                    $sql = "SELECT e.id, d.id as did, e.status, e.draught as mother_draught, d.draught as daughter_draught from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where (e.uuid='".$mysqli->real_escape_string($v1['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v2['uuid'])."') or (e.uuid='".$mysqli->real_escape_string($v2['uuid'])."' and d.uuid='".$mysqli->real_escape_string($v1['uuid'])."') and e.is_disappeared = 'No'";
                     $lat_lon_updatechk = $mysqli->query( $sql );
                     $lat_lon_update = mysqli_num_rows( $lat_lon_updatechk );  
                     if( $lat_lon_update > 0 ) {
@@ -452,14 +454,20 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 echo "Error: " . $sql . "\n" . $mysqli->error;
                             }
 
+                            $trans_signal = $detector->calculateTransferSignal($v1, $v2, $trow->mother_draught, $trow->daughter_draught);
+                            
                             $sql = "Update $event_table_daughter set
                                 `lat`='".$v2['lat']."',
                                 `lon`='".$v2['lon']."',
                                 `latest_distance`='".floatval($dist)."',
+                                `transfer_status`='".$trans_signal['signal']."',
+                                `transfer_confidence`='".$trans_signal['confidence']."',
                                 `last_updated`=NOW() where id='".$tdaughter_id."'";
                             if ($mysqli->query( $sql ) !== TRUE) {
                                 echo "Error: " . $sql . "\n" . $mysqli->error;
                             }
+
+
                         }
                         
                     }
@@ -850,7 +858,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 $sql = "SELECT id from ".$event_table_daughter." where event_id = '".$mysqli->real_escape_string($event_id)."' and mmsi='".$mysqli->real_escape_string($vehicel_2['mmsi'])."'";
                                 $result_event_id = $mysqli->query( $sql );
                                 $num_rows = mysqli_num_rows( $result_event_id );
-                                if( $num_rows == 0) {
+                                if( $num_rows == 0 && $vehicel_1['mmsi'] != $vehicel_2['mmsi']) {
                                     
                                     $daughter_status = 'tentative';
                                     if( floatval( $stationary_duration_hours ) >= 6 ) {

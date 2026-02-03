@@ -452,9 +452,91 @@ class STSTransferDetector {
             );
         }
         
+        echo '<pre>';print_r($analysis);echo '</pre>';
         return $analysis;
     }
 
+    /**
+     * Calculate transfer signal based on draught changes
+     */
+    public function calculateTransferSignal($vessel1, $vessel2, $initialDraught1, $initialDraught2) {
+        // Get current draughts
+
+        $vessel1 = get_datalastic_field( $vessel1['uuid']);
+        $vessel2 = get_datalastic_field( $vessel2['uuid']); 
+
+        $currentDraught1 = $vessel1['current_draught'] ?? 0;
+        $currentDraught2 = $vessel2['current_draught'] ?? 0;
+
+        // Calculate draught changes
+        $draughtChange1 = $currentDraught1 - $initialDraught1;
+        $draughtChange2 = $currentDraught2 - $initialDraught2;
+        
+        // Determine transfer direction with confidence
+        $draughtDifference1 = abs($draughtChange1);
+        $draughtDifference2 = abs($draughtChange2);
+        
+        // Set threshold for significant draught change (in meters)
+        $significantChange = 0.5;
+        
+        // Determine signal
+        if ($draughtDifference1 >= $significantChange || $draughtDifference2 >= $significantChange) {
+            if ($draughtChange1 > 0 && $draughtChange2 < 0) {
+                // Vessel1 increased draught, Vessel2 decreased - Vessel1 loading, Vessel2 discharging
+                return [
+                    'signal' => 'Likely Loading',
+                    'confidence' => $this->calculateTransferSignalConfidence($draughtDifference1, $draughtDifference2),
+                    'details' => "Vessel 1: +" . round($draughtChange1, 2) . "m, Vessel 2: " . round($draughtChange2, 2) . "m"
+                ];
+            } elseif ($draughtChange1 < 0 && $draughtChange2 > 0) {
+                // Vessel1 decreased draught, Vessel2 increased - Vessel1 discharging, Vessel2 loading
+                return [
+                    'signal' => 'Likely Discharge',
+                    'confidence' => $this->calculateTransferSignalConfidence($draughtDifference1, $draughtDifference2),
+                    'details' => "Vessel 1: " . round($draughtChange1, 2) . "m, Vessel 2: +" . round($draughtChange2, 2) . "m"
+                ];
+            } elseif ($draughtChange1 > 0 && $draughtChange2 > 0) {
+                // Both increased draught - inconclusive
+                return [
+                    'signal' => 'Inconclusive',
+                    'confidence' => $this->calculateTransferSignalConfidence($draughtDifference1, $draughtDifference2, false),
+                    'details' => "Both vessels increased draught"
+                ];
+            } elseif ($draughtChange1 < 0 && $draughtChange2 < 0) {
+                // Both decreased draught - inconclusive
+                return [
+                    'signal' => 'Inconclusive',
+                    'confidence' => $this->calculateTransferSignalConfidence($draughtDifference1, $draughtDifference2, false),
+                    'details' => "Both vessels decreased draught"
+                ];
+            }
+        }
+        
+        // No significant draught change
+        return [
+            'signal' => 'Inconclusive',
+            'confidence' => 'Low',
+            'details' => 'No significant draught changes detected'
+        ];
+    }
+
+    /**
+     * Calculate transfer signal confidence
+     */
+    private function calculateTransferSignalConfidence($draughtDiff1, $draughtDiff2, $clearSignal = true) {
+        $avgChange = ($draughtDiff1 + $draughtDiff2) / 2;
+        
+        if ($clearSignal) {
+            if ($avgChange >= 2.0) return 'High';
+            if ($avgChange >= 1.0) return 'Medium';
+            return 'Low';
+        } else {
+            // For inconclusive signals, confidence is generally lower
+            if ($avgChange >= 2.0) return 'Medium';
+            if ($avgChange >= 1.0) return 'Low';
+            return 'Low';
+        }
+    }
     private function calculateStationaryHours($history1, $history2, $startDate = null, $endDate = null) {
         $stationaryPeriods = [];
         
