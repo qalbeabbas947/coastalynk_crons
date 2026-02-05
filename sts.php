@@ -244,6 +244,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_mother."` (
   `completed_draught` float DEFAULT 0,
   `last_position_UTC` timestamp NULL DEFAULT NULL,
   `ais_signal` enum('','AIS Signal Gap Detected','AIS  Consistent Signal Detected') NOT NULL,
+  `ais_continuity` enum('','Good','Intermittent','Limited') DEFAULT '',
   `deadweight` float DEFAULT 0,
   `gross_tonnage` float DEFAULT 0,
   `port` varchar(255) DEFAULT '',
@@ -288,12 +289,16 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_daughter."` (
   `gross_tonnage` float DEFAULT 0,
   `draught_change` float DEFAULT 0,
   `ais_signal` enum('','AIS Signal Gap Detected','AIS  Consistent Signal Detected') DEFAULT NULL,
+  `ais_continuity` enum('','Good','Intermittent','Limited') DEFAULT '',
+  `proximity_signal` enum('','Sustained','Weak','Interrupted') DEFAULT '',
+  `draught_evidence` enum('','Available','AIS-Limited') DEFAULT '',
+   confidence_string enum('','High','Medium','Low') DEFAULT '',
   `joining_date` timestamp NULL DEFAULT NULL,
    lock_time timestamp NULL DEFAULT NULL,
   `end_date` timestamp NULL DEFAULT NULL,
   `distance` float DEFAULT 0,
   `latest_distance` FLOAT NULL DEFAULT '0',
-  `remarks` varchar(255) DEFAULT NULL,
+  `remarks` varchar(355) DEFAULT NULL,
   `event_percentage` float DEFAULT NULL,
   `event_desc` varchar(255) DEFAULT NULL,
   `cargo_category_type` varchar(255) DEFAULT NULL,
@@ -746,7 +751,17 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $proximity_consistency      = $detectresult['proximity_analysis']['proximity_consistency'];
                             $data_points_analyzed       = $detectresult['proximity_analysis']['data_points_analyzed'];
                             
-                            $risk_level     = $detectresult['risk_assessment']['risk_level'];
+                            $risk_level     = $detectresult['evidence_assessment']['risk_level'];
+
+                            $ais_continuity_v1     = $detectresult['evidence_assessment']['ais_continuity_v1'];
+                            $ais_continuity_v2     = $detectresult['evidence_assessment']['ais_continuity_v2'];
+                            $draught_evidence     = $detectresult['evidence_assessment']['draught_evidence'];
+                            $proximity_signal     = $detectresult['evidence_assessment']['proximity_signal'];
+                            $confidence_string     = $detectresult['risk_assessment']['confidence_string'];
+                            
+                            
+
+
 
                             $remarks        = $detectresult['risk_assessment']['remarks'];
                             $confidence     = $detectresult['risk_assessment']['confidence'];
@@ -794,7 +809,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `last_position_UTC`, `deadweight`, `gross_tonnage`, `port` ,
                                             `port_id`, `distance`, `event_ref_id`, `zone_type`, `zone_ship`, `zone_terminal_name` ,
                                             `start_date`,`last_updated`, status,
-                                            `is_email_sent`, `ais_signal`  )
+                                            `is_email_sent`, `ais_signal`,ais_continuity  )
                                         VALUES (
                                             '" . $mysqli->real_escape_string($vehicel_1['uuid']) . "',
                                             '" . $mysqli->real_escape_string($vehicel_1['name']) . "',
@@ -820,7 +835,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                                 '".$new_zone_terminal_name."',
                                             '".$start_date_m."', 
                                             '".$last_updated."', '".$status."',
-                                            'No', 'AIS  Consistent Signal Detected'
+                                            'No', 'AIS  Consistent Signal Detected', '".$ais_continuity_v1."'
                                             )";
                                 
                                 if ($mysqli->query( $sql ) !== TRUE) {
@@ -840,6 +855,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                 $sql = "Update $event_table_mother set
                                             `lat`='".$vehicel_1['lat']."',
                                             `lon`='".$vehicel_1['lon']."',
+                                            ais_continuity = '".$ais_continuity_v1."',
                                             `speed`='".floatval($vehicel_1['speed'])."',
                                             `navigation_status`='".$v1_navigation_status."',
                                             `distance`='".floatval($dist)."',
@@ -865,11 +881,12 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         $daughter_status = 'active';
                                     }
                                     $dateTime = new DateTime($vehicel_2['last_position_UTC']);
-                                    $mysqlDate = $dateTime->format('Y-m-d H:i:s');
+                                    $mysqlDate = $dateTime->format('Y-m-d H:i:s'); 
+
                                     $sql = "INSERT INTO $event_table_daughter (
                                         `event_id`,`uuid`,`name`,`mmsi`,`imo`,`country_iso`,`type`,`type_specific`,`lat`,
                                         `lon`,`speed`,`navigation_status`,`draught`,`last_position_UTC`,
-                                        `ais_signal`,`deadweight`,`gross_tonnage`,distance, latest_distance, last_updated, remarks, event_percentage, cargo_category_type, `risk_level`, `stationary_duration_hours`, `proximity_consistency`, `data_points_analyzed`, `operationmode`, `status`, step, joining_date, lock_time )
+                                        `ais_signal`,`deadweight`,`gross_tonnage`,distance, latest_distance, last_updated, remarks, event_percentage, cargo_category_type, `risk_level`, `stationary_duration_hours`, `proximity_consistency`, `data_points_analyzed`, `operationmode`, `status`, step, joining_date, lock_time, ais_continuity, proximity_signal, draught_evidence, confidence_string  )
                                         VALUES (
                                         '" . $mysqli->real_escape_string($event_id) . "',
                                         '" . $mysqli->real_escape_string($vehicel_2['uuid']) . "',
@@ -902,9 +919,10 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                         '".$daughter_status."', 
                                         0,
                                         '".$start_date_d."',
-                                        ".$lock_time."
+                                        ".$lock_time.",
+                                        '".$ais_continuity_v2."', '".$proximity_signal."', '".$draught_evidence."', '".$confidence_string."'
                                         )";
-                                    
+
                                     if ($mysqli->query( $sql ) !== TRUE) {
                                         echo "Error: " . $sql . "\n" . $mysqli->error;
                                     } else {
@@ -1064,6 +1082,10 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                                             `step`='0',`flag_status`='',`outcome_status`='',is_complete = 'No',
                                             end_date = Null,is_disappeared = 'No',
                                             `joining_date`='".$start_date_d."',
+                                            ais_continuity = '".$ais_continuity_v1."',
+                                            proximity_signal = '".$proximity_signal."',
+                                            draught_evidence = '".$draught_evidence."',
+                                            confidence_string = '".$confidence_string."'
                                             `lock_time`=".$lock_time." where id='".$row['id']."'";
 
                                         coastalynk_log_entry($row['id'], $sql, 'd query');
