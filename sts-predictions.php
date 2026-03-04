@@ -276,7 +276,7 @@ class STSTransferDetector {
             
             // Generate STS report
             $stsReport = $this->generateSTSReport($analysis, $vessel1, $vessel2);
-            echo '<pre>';print_r($stsReport);echo '</pre>';
+            
             return $stsReport;
             
         } catch (Exception $e) {
@@ -410,64 +410,47 @@ class STSTransferDetector {
 
     /**
      * 2.1 AIS Continuity Assessment
-     * Values: Good, Intermittent, Limited
-     * Logic:
-     * - Good → no AIS gaps during event window
-     * - Intermittent → gaps below tolerance (≤ 30 min)
-     * - Limited → gaps exceed tolerance (> 30 min)
+     * Values: Good, Delayed, Weak, Lost/Dark
+     * Logic based on signal freshness (time since last position):
+     * - Good → < 10 minutes
+     * - Delayed → 10–60 minutes
+     * - Weak → 1–24 hours
+     * - Lost/Dark → > 24 hours
      */
     private function assessAISContinuity($positions, $startTime = null, $endTime = null) {
         if (empty($positions)) {
-            return 'Limited'; // No data = limited continuity
+            return 'Lost/Dark'; // No data = lost/dark
         }
         
-        // Sort positions by timestamp
+        // Sort positions by timestamp (newest first to get latest position)
         usort($positions, function($a, $b) {
             $timeA = strtotime($a['last_position_UTC'] ?? $a['last_position_epoch'] ?? 0);
             $timeB = strtotime($b['last_position_UTC'] ?? $b['last_position_epoch'] ?? 0);
-            return $timeA <=> $timeB;
+            return $timeB <=> $timeA; // Descending order (newest first)
         });
         
-        // If no time window specified, analyze the entire dataset
-        if (!$startTime || !$endTime) {
-            $startTime = strtotime($positions[0]['last_position_UTC'] ?? $positions[0]['last_position_epoch'] ?? 'now');
-            $endTime = strtotime(end($positions)['last_position_UTC'] ?? end($positions)['last_position_epoch'] ?? 'now');
+        // Get the most recent position timestamp
+        $latestPositionTime = strtotime($positions[0]['last_position_UTC'] ?? $positions[0]['last_position_epoch'] ?? 0);
+        
+        // If no time window specified, use current time as reference
+        if (!$endTime) {
+            $referenceTime = time();
         } else {
-            $startTime = strtotime($startTime);
-            $endTime = strtotime($endTime);
+            $referenceTime = strtotime($endTime);
         }
         
-        $eventWindowSeconds = $endTime - $startTime;
-        $maxGapSeconds = self::AIS_GAP_TOLERANCE_MINUTES * 60;
+        // Calculate time difference in minutes
+        $timeDiffMinutes = ($referenceTime - $latestPositionTime) / 60;
         
-        // Find gaps in AIS data
-        $totalGapSeconds = 0;
-        $maxSingleGap = 0;
-        
-        for ($i = 0; $i < count($positions) - 1; $i++) {
-            $currentTime = strtotime($positions[$i]['last_position_UTC'] ?? $positions[$i]['last_position_epoch'] ?? 0);
-            $nextTime = strtotime($positions[$i + 1]['last_position_UTC'] ?? $positions[$i + 1]['last_position_epoch'] ?? 0);
-            
-            $gap = $nextTime - $currentTime;
-            
-            // Consider gaps only if they're significant (> 5 minutes)
-            if ($gap > 300) { // 5 minutes in seconds
-                $totalGapSeconds += $gap;
-                $maxSingleGap = max($maxSingleGap, $gap);
-            }
-        }
-        
-        // Calculate coverage percentage
-        $coverageSeconds = $eventWindowSeconds - $totalGapSeconds;
-        $coveragePercentage = ($eventWindowSeconds > 0) ? ($coverageSeconds / $eventWindowSeconds) * 100 : 0;
-        
-        // Determine AIS Continuity value
-        if ($coveragePercentage >= 95 && $maxSingleGap <= $maxGapSeconds) {
+        // Determine AIS Continuity based on signal freshness
+        if ($timeDiffMinutes < 10) {
             return 'Good';
-        } elseif ($coveragePercentage >= 80 && $maxSingleGap <= $maxGapSeconds * 2) {
-            return 'Intermittent';
+        } elseif ($timeDiffMinutes >= 10 && $timeDiffMinutes < 60) {
+            return 'Delayed';
+        } elseif ($timeDiffMinutes >= 60 && $timeDiffMinutes < 1440) { // 1440 minutes = 24 hours
+            return 'Weak';
         } else {
-            return 'Limited';
+            return 'Lost/Dark';
         }
     }
     
@@ -597,8 +580,8 @@ class STSTransferDetector {
             'data_points_analyzed' => min(count($history1), count($history2)),
             'sts_detected' => false,
             'stationary_periods' => [],
-            'ais_continuity_v1' => 'Limited',
-            'ais_continuity_v2' => 'Limited',
+            'ais_continuity_v1' => 'Weak',
+            'ais_continuity_v2' => 'Weak',
             'proximity_signal' => 'Interrupted',
             'draught_evidence' => 'AIS-Limited' // Initialize with default
         ];
@@ -815,6 +798,17 @@ class STSTransferDetector {
             return 'Low';
         }
     }
+
+    /**
+     * Get position freshness description
+     */
+    private function getPositionFreshness($minutes) {
+        if ($minutes <= 10) return 'Live';
+        if ($minutes <= 60) return 'Recent';
+        if ($minutes <= 1440) return 'Stale';
+        return 'Outdated';
+    }
+
     private function calculateStationaryHours($history1, $history2, $startDate = null, $endDate = null) {
         $stationaryPeriods = [];
         
@@ -969,6 +963,159 @@ class STSTransferDetector {
         return 0;
     }
 
+     private $activeSTSVessels = [];
+    
+    /**
+     * Force vessel visibility on map for active STS transfers
+     */
+    public function getVesselsForMapDisplay($vessel1MMSI, $vessel2MMSI) {
+        $vesselsToDisplay = [];
+        
+        // Get vessel info
+        $vessel1 = $this->getVesselInfo($vessel1MMSI);
+        $vessel2 = $this->getVesselInfo($vessel2MMSI);
+        
+        if (!$vessel1 || !$vessel2) {
+            return $vesselsToDisplay;
+        }
+        
+        // Check if this is an active STS transfer
+        $analysis = $this->detectSTSTransfer($vessel1, $vessel2);
+        
+        if ($analysis['sts_detected']) {
+            // Force both vessels visible
+            $vesselsToDisplay[] = $this->prepareVesselForMap($vessel1, true);
+            $vesselsToDisplay[] = $this->prepareVesselForMap($vessel2, true);
+            
+            // Track active STS vessels
+            $this->trackActiveSTSVessels($vessel1MMSI, $vessel2MMSI);
+        }
+        
+        return $vesselsToDisplay;
+    }
+    
+    /**
+     * Prepare vessel data for map display
+     */
+    private function prepareVesselForMap($vesselData, $forceVisible = false) {
+        $latestTimestamp = strtotime($vesselData['last_position_UTC'] ?? 0);
+        $currentTime = time();
+        $minutesSinceLastSignal = ($currentTime - $latestTimestamp) / 60;
+        
+        $vesselForMap = [
+            'mmsi' => $vesselData['mmsi'] ?? 'Unknown',
+            'name' => $vesselData['name'] ?? 'Unknown',
+            'type' => $vesselData['type'] ?? 'Unknown',
+            'lat' => $vesselData['lat'] ?? 0,
+            'lon' => $vesselData['lon'] ?? 0,
+            'speed' => $vesselData['speed'] ?? 0,
+            'course' => $vesselData['course'] ?? 0,
+            'heading' => $vesselData['heading'] ?? 0,
+            'status' => $vesselData['status'] ?? 0,
+            'last_position' => $vesselData['last_position_UTC'] ?? '',
+            'force_visible' => $forceVisible,
+            'ais_status' => $this->getAISStatus($minutesSinceLastSignal),
+            'sts_active' => $forceVisible,
+            'marker_color' => $forceVisible ? 'red' : 'blue',
+            'popup_content' => $this->generateVesselPopup($vesselData, $forceVisible)
+        ];
+        
+        return $vesselForMap;
+    }
+    
+    /**
+     * Get AIS status based on signal freshness
+     */
+    private function getAISStatus($minutesSinceLastSignal) {
+        if ($minutesSinceLastSignal <= 10) {
+            return ['status' => 'Good', 'icon' => 'green', 'message' => 'Live signal'];
+        } elseif ($minutesSinceLastSignal <= 60) {
+            return ['status' => 'Delayed', 'icon' => 'yellow', 'message' => 'Signal delayed'];
+        } elseif ($minutesSinceLastSignal <= 1440) {
+            return ['status' => 'Weak', 'icon' => 'orange', 'message' => 'Weak signal'];
+        } else {
+            return ['status' => 'Lost/Dark', 'icon' => 'gray', 'message' => 'AIS signal lost'];
+        }
+    }
+    
+    /**
+     * Track active STS vessels
+     */
+    private function trackActiveSTSVessels($mmsi1, $mmsi2) {
+        $this->activeSTSVessels[$mmsi1] = [
+            'mmsi' => $mmsi1,
+            'partner_mmsi' => $mmsi2,
+            'detected_at' => time(),
+            'last_updated' => time()
+        ];
+        
+        $this->activeSTSVessels[$mmsi2] = [
+            'mmsi' => $mmsi2,
+            'partner_mmsi' => $mmsi1,
+            'detected_at' => time(),
+            'last_updated' => time()
+        ];
+    }
+
+    /**
+     * Generate popup content for vessel on map
+     */
+    private function generateVesselPopup($vesselData, $stsActive = false) {
+        $minutesSinceLastSignal = $this->getMinutesSinceLastSignal($vesselData);
+        $aisStatus = $this->getAISStatus($minutesSinceLastSignal);
+        
+        $popup = "<div class='vessel-popup'>";
+        $popup .= "<h4>{$vesselData['name']} ({$vesselData['mmsi']})</h4>";
+        $popup .= "<p><strong>Type:</strong> {$vesselData['type']}</p>";
+        $popup .= "<p><strong>Speed:</strong> " . round($vesselData['speed'] ?? 0, 1) . " knots</p>";
+        $popup .= "<p><strong>Course:</strong> " . round($vesselData['course'] ?? 0, 1) . "°</p>";
+        $popup .= "<p><strong>Last Position:</strong> {$vesselData['last_position_UTC']}</p>";
+        $popup .= "<p><strong>AIS Status:</strong> <span class='ais-{$aisStatus['status']}'>{$aisStatus['message']}</span></p>";
+        
+        if ($stsActive) {
+            $popup .= "<p class='sts-warning'><strong>⚠️ ACTIVE STS TRANSFER</strong></p>";
+        }
+        
+        if ($aisStatus['status'] === 'Lost/Dark') {
+            $popup .= "<p class='ais-lost'>⚠️ Displaying last known position</p>";
+        }
+        
+        $popup .= "</div>";
+        
+        return $popup;
+    }
+    
+    /**
+     * Get all vessels that should be forced visible
+     */
+    public function getForceVisibleVessels() {
+        $forceVisible = [];
+        $expiryTime = time() - (24 * 3600); // 24 hours ago
+        
+        foreach ($this->activeSTSVessels as $mmsi => $data) {
+            if ($data['last_updated'] > $expiryTime) {
+                $vessel = $this->getVesselInfo($mmsi);
+                if ($vessel) {
+                    $forceVisible[] = $this->prepareVesselForMap($vessel, true);
+                }
+            } else {
+                // Remove expired entries
+                unset($this->activeSTSVessels[$mmsi]);
+            }
+        }
+        
+        return $forceVisible;
+    }
+
+    /**
+     * Get minutes since last signal
+     */
+    private function getMinutesSinceLastSignal($vesselData) {
+        $latestTimestamp = strtotime($vesselData['last_position_UTC'] ?? 0);
+        $currentTime = time();
+        return ($currentTime - $latestTimestamp) / 60;
+    }
+
     /**
      * Generate comprehensive STS report
      */
@@ -1021,7 +1168,13 @@ class STSTransferDetector {
         $operationStatus = $this->getOperationStatus($analysis);
         
         $remarks = $this->generateRemarks($analysis, $vessel1, $vessel2, $cargoType1, $cargoType2);
+        // Get minutes since last signal
+        $minutesSinceSignal1 = $this->getMinutesSinceLastSignal($vessel1);
+        $minutesSinceSignal2 = $this->getMinutesSinceLastSignal($vessel2);
         
+        // Get detailed AIS status
+        $aisStatus1 = $this->getAISStatus($minutesSinceSignal1);
+        $aisStatus2 = $this->getAISStatus($minutesSinceSignal2);
         return [
             'sts_transfer_detected' => $analysis['sts_detected'],
             // 'zone_terminal_name' => $zoneTerminalName,
@@ -1036,7 +1189,11 @@ class STSTransferDetector {
                 'vessel_condition' => $vesselCondition1,
                 'cargo_eta' => $cargoETA1,
                 'vessel_owner' => $vesselOwner1,
-                'ais_continuity' => $analysis['ais_continuity_v1']
+                'ais_continuity' => $analysis['ais_continuity_v1'],
+                'ais_status' => $aisStatus1, // Add detailed AIS status
+                'last_signal_age_minutes' => round($minutesSinceSignal1, 1),
+                'position_freshness' => $this->getPositionFreshness($minutesSinceSignal1),
+                'force_visible' => $analysis['sts_detected'] // Should be forced visible on map
             ],
             'vessel_2' => [
                 'name' => $vessel2['name'] ?? 'Unknown',
@@ -1047,7 +1204,11 @@ class STSTransferDetector {
                 'vessel_condition' => $vesselCondition2,
                 'cargo_eta' => $cargoETA2,
                 'vessel_owner' => $vesselOwner2,
-                'ais_continuity' => $analysis['ais_continuity_v2']
+                'ais_continuity' => $analysis['ais_continuity_v2'],
+                'ais_status' => $aisStatus2, // Add detailed AIS status
+                'last_signal_age_minutes' => round($minutesSinceSignal2, 1),
+                'position_freshness' => $this->getPositionFreshness($minutesSinceSignal2),
+                'force_visible' => $analysis['sts_detected'] // Should be forced visible on map
             ],
             'proximity_analysis' => [
                 'current_distance_nm' => round($analysis['current_distance_nm'], 3),
@@ -1144,8 +1305,12 @@ class STSTransferDetector {
         // Add AIS continuity remarks
         if ($analysis['ais_continuity_v1'] === 'Good' && $analysis['ais_continuity_v2'] === 'Good') {
             $remarks[] = "Both vessels have good AIS continuity";
-        } elseif ($analysis['ais_continuity_v1'] === 'Limited' || $analysis['ais_continuity_v2'] === 'Limited') {
+        } elseif ($analysis['ais_continuity_v1'] === 'Weak' || $analysis['ais_continuity_v2'] === 'Weak') {
             $remarks[] = "Limited AIS continuity may affect accuracy";
+        } elseif ($analysis['ais_continuity_v1'] === 'Delayed' || $analysis['ais_continuity_v2'] === 'Delayed') {
+            $remarks[] = "Delayed AIS continuity may affect accuracy";
+        } elseif ($analysis['ais_continuity_v1'] === 'Lost/Dark' || $analysis['ais_continuity_v2'] === 'Lost/Dark') {
+            $remarks[] = "Lost/Dark AIS continuity may affect accuracy";
         }
         
         // Add proximity signal remarks

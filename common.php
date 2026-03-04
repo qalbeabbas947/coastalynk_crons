@@ -58,7 +58,7 @@ function total_sts_daughter_vessels( $event_id, $step_id = 0  ) {
 
     $step_where = '';
     if( $step_id > 0 ) {
-        $step_where = ' and step = '.$step_id;
+        $step_where = ' and step >= '.$step_id;
     }
 
     $sql = "select id from ".$event_table_daughter." where event_id='".$event_id."' ".$step_where;
