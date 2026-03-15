@@ -430,7 +430,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
             $daughter_id = 0;
             foreach ($vessels as $v2) {
                 $item_count_sub++;
-                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker') && !in_array( $v1['mmsi'], ['657263500'] )) { // && $total_allowed < 1
+                if ($v1['uuid'] != $v2['uuid'] && !empty( $v2['type'] ) && str_contains($v2['type'], 'Tanker')) { // && $total_allowed < 1
                     $new_entry = false;
                     $row = false;
 
@@ -445,6 +445,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             $tdaughter_id = $trow->did;
                             $dist = haversineDistance( $v1['lat'], $v1['lon'], $v2['lat'], $v2['lon'] );
                             $detectresult = $detector->detectSTSTransfer($v1, $v2);
+                            echo '<pre>step1';print_r($detectresult);echo '</pre>';
                             $ais_continuity_v1     = $detectresult['evidence_assessment']['ais_continuity_v1'];
                             $ais_continuity_v2     = $detectresult['evidence_assessment']['ais_continuity_v2'];
                             $sql = "Update $event_table_mother set
@@ -460,7 +461,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                             }
 
                             $trans_signal = $detector->calculateTransferSignal($v1, $v2, $trow->mother_draught, $trow->daughter_draught);
-                            
+                            echo '<pre>trans_signal1';print_r($trans_signal);echo '</pre>';
                             $sql = "Update $event_table_daughter set
                                 `lat`='".$v2['lat']."',
                                 `lon`='".$v2['lon']."',
@@ -565,6 +566,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         if ($at_event_creation_close_distance && $at_event_creation_allowed_speed && $at_event_creation_allowed_heading) {
                             
                             $detectresult = $detector->detectSTSTransfer($v1, $v2);
+                            echo '<pre>step2';print_r($detectresult);echo '</pre>';
                             $vessel_array[$v1['mmsi']]['start_date'] = $detectresult['start_date'];
                             $stationary_duration_hours  = $detectresult['proximity_analysis']['stationary_duration_hours'];
                             $stationary_duration_mins = (floatval( $stationary_duration_hours)*60);
@@ -641,6 +643,7 @@ if( isset( $data ) && isset( $data['data'] ) && isset( $data['data']['total'] ) 
                         $vehicel_2 = $cached_data[$mmsi];
                         
                         $detectresult = $detector->detectSTSTransfer($vehicel_1, $vehicel_2);
+                        echo '<pre>step3';print_r($detectresult);echo '</pre>';
                         // if( intval( $detectresult['sts_transfer_detected'] ) == 1 ) 
                         {
                             if( $event_id == 0 ) {
@@ -1436,6 +1439,7 @@ function process_complete_sts_vessels( $row, $passed_end_date = '' ) {
         $log .= ', Event Desc: '.$event_desc;
 
         $detectresult = $detector->detectSTSTransfer($v1, $v2);
+        echo '<pre>step4';print_r($detectresult);echo '</pre>';
         $end_date = 'Now()';
         if( !empty( $detectresult['end_date'] ) ) {
             $end_date = "'".date('Y-m-d H:i:s', strtotime($detectresult['end_date']))."'";

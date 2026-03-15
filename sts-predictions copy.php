@@ -1,5 +1,7 @@
 <?php
 
+
+
 class STSTransferDetector {
     private $apiKey;
     private $baseUrl = 'https://api.datalastic.com/api/v0';
@@ -7,19 +9,6 @@ class STSTransferDetector {
     // Constants for AIS gap tolerance (in minutes)
     private const AIS_GAP_TOLERANCE_MINUTES = 30;
     private const EVENT_WINDOW_HOURS = 6; // Window to analyze for AIS continuity
-    
-    // New constants for Nigerian STS calibration
-    private const PROXIMITY_THRESHOLD_KM = 1; // < 1 km sustained
-    private const PROXIMITY_THRESHOLD_NM = 0.54; // ~1 km in nautical miles
-    private const HIGH_CONFIDENCE_DURATION_HOURS = 2; // ≥ 2 hours for High confidence
-    private const MODERATE_CONFIDENCE_DURATION_MINUTES = 30; // Minimum for Moderate confidence
-    private const SPEED_THRESHOLD_KNOTS = 1; // 0-1 knots for both vessels
-    private const HEADING_VARIANCE_THRESHOLD = 15; // < 15 degrees
-    private const POSITIONAL_DRIFT_THRESHOLD_M = 200; // < 200m from median position
-    private const AIS_GAP_NO_PENALTY_MINUTES = 20; // < 20 min - no penalty
-    private const AIS_GAP_MILD_PENALTY_MINUTES = 60; // 20-60 min - mild penalty if inconsistent
-    private const PARALLEL_ALIGNMENT_MINUTES = 10; // ≥ 10 minutes for parallel alignment
-    private const STABLE_INTERVAL_MINUTES = 15; // ≥ 15 minutes for stable interaction
 
     public function __construct($apiKey) {
         $this->apiKey = $apiKey;
@@ -113,12 +102,53 @@ class STSTransferDetector {
      * Calculate risk level based on multiple factors
      */
     private function calculateRiskLevel($vessel1, $vessel2, $stationaryHours, $distanceNM) {
+        // $riskScore = 0;
+        
+        // // Distance factor
+        // if ($distanceNM <= 0.1) $riskScore += 3;
+        // elseif ($distanceNM <= 0.2) $riskScore += 2;
+        // elseif ($distanceNM <= ALLOWED_STS_RANGE_NM) $riskScore += 1;
+        
         // Duration factor
         if ($stationaryHours >= 6) return 'HIGH';
         elseif ($stationaryHours >= 4) return 'MEDIUM';
         else return 'LOW';
+        
+        // Vessel type factor
+        // $type1 = $vessel1['type'] ?? '';
+        // $type2 = $vessel2['type'] ?? '';
+        
+        // if (stripos($type1, 'tanker') !== false && stripos($type2, 'tanker') !== false) {
+        //     $riskScore += 2; // Tanker-to-tanker transfer
+        // }
+        
+        // // Determine risk level
+        // if ($riskScore >= 5) return 'HIGH';
+        // if ($riskScore >= 3) return 'MEDIUM';
+        // return 'LOW';
     }
     
+    /**
+     * Calculate confidence level
+     */
+    private function calculateConfidence($dataPoints, $consistency, $stationaryHours) {
+        $confidence = 0;
+        
+        // Data points factor
+        if ($dataPoints >= 20) $confidence += 40;
+        elseif ($dataPoints >= 10) $confidence += 30;
+        elseif ($dataPoints >= 5) $confidence += 20;
+        
+        // Consistency factor
+        $confidence += ($consistency * 30);
+        
+        // Duration factor
+        if ($stationaryHours >= 4) $confidence += 30;
+        elseif ($stationaryHours >= 3) $confidence += 20;
+        
+        return min(100, $confidence);
+    }
+
     /**
      * Get zone/terminal name based on position
      */
@@ -221,6 +251,7 @@ class STSTransferDetector {
         
         $stationaryHours = $analysis['stationary_hours'];
         
+        //if ($stationaryHours >= 6) return 'Completed';
         if ($stationaryHours >= 3) return 'Ongoing';
         
         return 'Detected';
@@ -236,10 +267,10 @@ class STSTransferDetector {
                 throw new Exception("Could not retrieve vessel information");
             }
             
-            // Get historical data (last 24 hours)
+            // Get historical data (last 6 hours)
             $history1 = $this->getVesselHistory($vessel1['mmsi'], 24);
-            $history2 = $this->getVesselHistory($vessel2['mmsi'], 24);
             
+            $history2 = $this->getVesselHistory($vessel2['mmsi'], 24);
             // Analyze proximity and movement patterns
             $analysis = $this->analyzeVesselBehavior($history1, $history2, $vessel1, $vessel2);
             
@@ -257,223 +288,48 @@ class STSTransferDetector {
     }
    
     /**
-     * Calculate confidence level based on evidence (Calibrated for Nigerian waters)
-     * Values: High, Moderate, Low (display) / high, medium, low (internal)
-     * 
+     * Calculate confidence level based on evidence
+     * Enum: High, Medium, Low
      * Logic:
-     * - Step 1: Evaluate core behavioural conditions (distance, speed, duration, heading)
-     * - Step 2: If core conditions met → assign provisional Medium confidence
-     * - Step 3: Check supporting signals (draught, zone, pattern) → one or more upgrades to High
-     * - Step 4: Evaluate AIS gap severity → downgrade only if gaps break pattern confirmation
-     * - Step 5: Assign final confidence tier
-     * 
-     * Safeguard: Low confidence only if core behavioural conditions are not met
+     * - High = no AIS gaps + sustained proximity
+     * - Medium = minor AIS gaps OR weak draught data
+     * - Low = significant AIS gaps OR incomplete proximity window
      */
     private function calculateConfidenceString($analysis) {
-        // Step 1: Evaluate core behavioural conditions
-        $coreConditionsMet = $this->evaluateCoreConditions($analysis);
+        $aisContinuity1 = $analysis['ais_continuity_v1'];
+        $aisContinuity2 = $analysis['ais_continuity_v2'];
+        $proximitySignal = $analysis['proximity_signal'];
+        $draughtEvidence = $analysis['draught_evidence'] ?? 'AIS-Limited';
         
-        if (!$coreConditionsMet) {
-            return 'Low'; // Core conditions not met → Low confidence
+        // Check for High confidence conditions
+        $noAISGaps = ($aisContinuity1 === 'Good' && $aisContinuity2 === 'Good');
+        $sustainedProximity = ($proximitySignal === 'Sustained');
+        
+        if ($noAISGaps && $sustainedProximity) {
+            return 'High';
         }
         
-        // Step 2: Core conditions met → provisional Medium
-        $provisionalConfidence = 'Medium';
+        // Check for Low confidence conditions
+        $significantAISGaps = ($aisContinuity1 === 'Limited' || $aisContinuity2 === 'Limited');
+        $incompleteProximity = ($proximitySignal === 'Interrupted');
         
-        // Step 3: Check for supporting signals
-        $supportingSignals = $this->countSupportingSignals($analysis);
-        
-        // Special case: dark_event_during_interaction counts as two signals
-        if (!empty($analysis['dark_event_during_interaction']) && $analysis['dark_event_during_interaction'] === true) {
-            $supportingSignals += 2;
+        if ($significantAISGaps || $incompleteProximity) {
+            return 'Low';
         }
         
-        // Upgrade to High if at least one supporting signal present
-        if ($supportingSignals >= 1) {
-            $provisionalConfidence = 'High';
+        // Check for Medium confidence conditions
+        $minorAISGaps = ($aisContinuity1 === 'Intermittent' || $aisContinuity2 === 'Intermittent');
+        $weakProximity = ($proximitySignal === 'Weak');
+        $weakDraughtData = ($draughtEvidence === 'AIS-Limited');
+        
+        if ($minorAISGaps || $weakProximity || $weakDraughtData) {
+            return 'Medium';
         }
         
-        // Step 4: Evaluate AIS gap severity (downgrade only if gaps break pattern)
-        $finalConfidence = $this->applyAISGapPenalty($provisionalConfidence, $analysis);
-        
-        return $finalConfidence;
+        // Default to Medium if no specific conditions met
+        return 'Medium';
     }
     
-    /**
-     * Evaluate core behavioural conditions for STS
-     */
-    private function evaluateCoreConditions($analysis) {
-        // Check distance threshold (< 1 km sustained)
-        $distanceThresholdMet = $analysis['current_distance_nm'] <= self::PROXIMITY_THRESHOLD_NM;
-        
-        // Check speed threshold (both vessels 0-1 knots, time-averaged)
-        $speedThresholdMet = $this->checkSpeedThreshold($analysis);
-        
-        // Check duration threshold (≥ 2 hours for High, ≥ 30 min for Moderate)
-        // For core conditions evaluation, we check if duration meets minimum for Moderate
-        $durationMinutes = $analysis['stationary_hours'] * 60;
-        $durationMet = $durationMinutes >= self::MODERATE_CONFIDENCE_DURATION_MINUTES;
-        
-        // Check heading stability
-        $headingStabilityMet = $this->checkHeadingStability($analysis);
-        
-        // Core conditions require distance, speed, and either duration or heading stability
-        return $distanceThresholdMet && $speedThresholdMet && ($durationMet || $headingStabilityMet);
-    }
-    
-    /**
-     * Check speed threshold (time-averaged 0-1 knots for both vessels)
-     */
-    private function checkSpeedThreshold($analysis) {
-        if (empty($analysis['vessel1_speeds']) || empty($analysis['vessel2_speeds'])) {
-            // Use stationary_hours as proxy if detailed speed data not available
-            return $analysis['stationary_hours'] > 0;
-        }
-        
-        $avgSpeed1 = array_sum($analysis['vessel1_speeds']) / count($analysis['vessel1_speeds']);
-        $avgSpeed2 = array_sum($analysis['vessel2_speeds']) / count($analysis['vessel2_speeds']);
-        
-        // Allow brief manoeuvring (transient 1-3 kn tolerated on one vessel)
-        $transientTolerance = 3.0;
-        
-        return ($avgSpeed1 <= self::SPEED_THRESHOLD_KNOTS || $avgSpeed1 <= $transientTolerance) &&
-               ($avgSpeed2 <= self::SPEED_THRESHOLD_KNOTS || $avgSpeed2 <= $transientTolerance);
-    }
-    
-    /**
-     * Check heading stability (< 15 degrees variance)
-     */
-    private function checkHeadingStability($analysis) {
-        if (empty($analysis['vessel1_headings']) || empty($analysis['vessel2_headings'])) {
-            return true; // Can't assess, assume stable
-        }
-        
-        $variance1 = $this->calculateHeadingVariance($analysis['vessel1_headings']);
-        $variance2 = $this->calculateHeadingVariance($analysis['vessel2_headings']);
-        
-        return $variance1 <= self::HEADING_VARIANCE_THRESHOLD && 
-               $variance2 <= self::HEADING_VARIANCE_THRESHOLD;
-    }
-    
-    /**
-     * Calculate heading variance (simplified)
-     */
-    private function calculateHeadingVariance($headings) {
-        if (empty($headings)) {
-            return 0;
-        }
-        
-        $mean = array_sum($headings) / count($headings);
-        $variance = 0;
-        
-        foreach ($headings as $heading) {
-            $variance += pow($heading - $mean, 2);
-        }
-        
-        return sqrt($variance / count($headings));
-    }
-    
-    /**
-     * Count supporting signals for confidence upgrade
-     */
-    private function countSupportingSignals($analysis) {
-        $signals = 0;
-        
-        // Draught change present (if available) - confirming signal
-        if (!empty($analysis['draught_change_detected']) && $analysis['draught_change_detected']) {
-            $signals++;
-        }
-        
-        // Zone overlap (STS zone or designated anchorage)
-        if (!empty($analysis['in_sts_zone']) && $analysis['in_sts_zone']) {
-            $signals++;
-        }
-        
-        // Vessel type supports STS (tanker-to-tanker, FSO, FSU, shuttle)
-        if (!empty($analysis['vessel_types_support_sts']) && $analysis['vessel_types_support_sts']) {
-            $signals++;
-        }
-        
-        // Parallel/loitering pattern
-        if (!empty($analysis['parallel_pattern_detected']) && $analysis['parallel_pattern_detected']) {
-            $signals++;
-        }
-        
-        // Historical STS behaviour
-        if (!empty($analysis['historical_sts']) && $analysis['historical_sts']) {
-            $signals++;
-        }
-        
-        // Dark in STS zone (if available from external source)
-        if (!empty($analysis['dark_in_sts_zone']) && $analysis['dark_in_sts_zone']) {
-            $signals++;
-        }
-        
-        return $signals;
-    }
-    
-    /**
-     * Apply AIS gap penalty (only if gaps break pattern confirmation)
-     */
-    private function applyAISGapPenalty($currentConfidence, $analysis) {
-        $maxGapMinutes = $analysis['max_ais_gap_minutes'] ?? 0;
-        
-        // No penalty for minor gaps (< 20 min)
-        if ($maxGapMinutes < self::AIS_GAP_NO_PENALTY_MINUTES) {
-            return $currentConfidence;
-        }
-        
-        // Mild penalty for moderate gaps (20-60 min) if pre/post tracks inconsistent
-        if ($maxGapMinutes >= self::AIS_GAP_NO_PENALTY_MINUTES && 
-            $maxGapMinutes < self::AIS_GAP_MILD_PENALTY_MINUTES) {
-            
-            // Check if pre-gap and post-gap tracks are consistent
-            if (!$this->areTracksConsistent($analysis)) {
-                // Downgrade only if tracks are inconsistent
-                return ($currentConfidence === 'High') ? 'Medium' : $currentConfidence;
-            }
-            return $currentConfidence; // No penalty if tracks consistent
-        }
-        
-        // Large gaps (> 60 min) - downgrade to Low if pattern cannot be reconstructed
-        if ($maxGapMinutes >= self::AIS_GAP_MILD_PENALTY_MINUTES) {
-            if (!$this->canReconstructPattern($analysis)) {
-                return 'Low'; // Can't reconstruct → Low confidence
-            }
-            // If can reconstruct, maintain current confidence (might downgrade High→Medium)
-            return ($currentConfidence === 'High') ? 'Medium' : $currentConfidence;
-        }
-        
-        return $currentConfidence;
-    }
-    
-    /**
-     * Check if pre-gap and post-gap tracks are consistent
-     */
-    private function areTracksConsistent($analysis) {
-        // Check if pre-gap and post-gap positions exist and are consistent
-        if (empty($analysis['pre_gap_positions']) || empty($analysis['post_gap_positions'])) {
-            return false;
-        }
-        
-        // Verify positions before and after gap are within proximity threshold
-        $preDistance = $analysis['pre_gap_distance'] ?? PHP_INT_MAX;
-        $postDistance = $analysis['post_gap_distance'] ?? PHP_INT_MAX;
-        
-        return $preDistance <= self::PROXIMITY_THRESHOLD_NM && 
-               $postDistance <= self::PROXIMITY_THRESHOLD_NM;
-    }
-    
-    /**
-     * Check if pattern can be reconstructed across gap
-     */
-    private function canReconstructPattern($analysis) {
-        // Check if we can interpolate behaviour through gap
-        return $this->areTracksConsistent($analysis) && 
-               ($analysis['position_drift_m'] ?? 0) <= self::POSITIONAL_DRIFT_THRESHOLD_M &&
-               $this->checkHeadingStability($analysis);
-    }
-
     /**
      * Detect end conditions for STS transfer
      */
@@ -657,7 +513,7 @@ class STSTransferDetector {
         }
         
         // Analyze proximity consistency
-        $proximityThresholdNM = self::PROXIMITY_THRESHOLD_NM;
+        $proximityThresholdNM = ALLOWED_STS_RANGE_NM;
         $proximityEvents = 0;
         $totalComparisons = 0;
         $proximityStreak = 0;
@@ -688,8 +544,8 @@ class STSTransferDetector {
                 
                 // Check for gaps between consecutive common times
                 if ($index > 0) {
-                    $timeGap = ($time - $commonTimes[$index - 1]) / 60; // Convert to minutes
-                    if ($timeGap > self::AIS_GAP_TOLERANCE_MINUTES) {
+                    $timeGap = $time - $commonTimes[$index - 1];
+                    if ($timeGap > self::AIS_GAP_TOLERANCE_MINUTES * 60) {
                         $gapDetected = true;
                     }
                 }
@@ -699,8 +555,8 @@ class STSTransferDetector {
         // Calculate proximity percentage
         $proximityPercentage = ($totalComparisons > 0) ? ($proximityEvents / $totalComparisons) * 100 : 0;
         
-        // Determine Proximity Signal value (calibrated for Nigerian waters)
-        if ($proximityPercentage >= 80 && $maxProximityStreak >= 5 && !$gapDetected) {
+        // Determine Proximity Signal value
+        if ($proximityPercentage >= 90 && $maxProximityStreak >= 10 && !$gapDetected) {
             return 'Sustained';
         } elseif ($proximityPercentage >= 50 && $maxProximityStreak >= 3) {
             return 'Weak';
@@ -710,7 +566,7 @@ class STSTransferDetector {
     }
 
     /**
-     * Analyze vessel behavior for STS patterns (Calibrated for Nigerian waters)
+     * Analyze vessel behavior for STS patterns
      */
     private function analyzeVesselBehavior($history1, $history2, $vessel1, $vessel2) {
         $analysis = [
@@ -727,41 +583,7 @@ class STSTransferDetector {
             'ais_continuity_v1' => 'Weak',
             'ais_continuity_v2' => 'Weak',
             'proximity_signal' => 'Interrupted',
-            'draught_evidence' => 'AIS-Limited',
-            
-            // New fields for calibrated confidence
-            'vessel1_speeds' => [],
-            'vessel2_speeds' => [],
-            'vessel1_headings' => [],
-            'vessel2_headings' => [],
-            'max_ais_gap_minutes' => 0,
-            'draught_change_detected' => false,
-            'in_sts_zone' => false,
-            'vessel_types_support_sts' => false,
-            'parallel_pattern_detected' => false,
-            'historical_sts' => false,
-            'position_drift_m' => 0,
-            'pre_gap_positions' => [],
-            'post_gap_positions' => [],
-            'pre_gap_distance' => null,
-            'post_gap_distance' => null,
-            'dark_event_during_interaction' => null,
-            'dark_in_sts_zone' => false,
-            
-            // Timeline phase timestamps
-            'proximity_start' => null,
-            'slow_speed_start' => null,
-            'alignment_start' => null,
-            'stable_start' => null,
-            'manoeuvre_start' => null,
-            'separation_confirmed' => null,
-            
-            // Engine output fields
-            'confidence_level' => 'Low',
-            'transfer_signal' => 'Possible STS',
-            'ais_integrity' => 'Stable',
-            'interaction_window_duration' => null,
-            'interaction_stability' => 'Not available'
+            'draught_evidence' => 'AIS-Limited' // Initialize with default
         ];
         
         if (empty($history1) || empty($history2)) {
@@ -791,27 +613,12 @@ class STSTransferDetector {
             $analysis['lock_time'] = $stsPeriod['start'];
         }
         
-        // Analyze proximity consistency and collect behavioural data
+        // Analyze proximity consistency
         $closeProximityCount = 0;
         $totalComparisons = 0;
-        $alignmentDuration = 0;
-        $alignmentStartTime = null;
-        
-        // Track timeline phases
-        $proximityEstablished = false;
-        $slowSpeedConfirmed = false;
-        $alignmentConfirmed = false;
-        $stableConfirmed = false;
-        $manoeuvreDetected = false;
-        
-        // Track positions for gap analysis
-        $allPositions1 = [];
-        $allPositions2 = [];
         
         foreach ($history1['positions'] as $point1) {
-            $allPositions1[] = $point1;
             foreach ($history2['positions'] as $point2) {
-                $allPositions2[] = $point2;
                 if (is_array($point1) && is_array($point2)) {
                     $timeDiff = abs(strtotime($point1['last_position_epoch'] ?? 0) - strtotime($point2['last_position_epoch'] ?? 0));
                     
@@ -821,61 +628,13 @@ class STSTransferDetector {
                             $point2['lat'], $point2['lon']
                         );
                         
-                        // Collect behavioural data
-                        $analysis['vessel1_speeds'][] = $point1['speed'] ?? 0;
-                        $analysis['vessel2_speeds'][] = $point2['speed'] ?? 0;
-                        $analysis['vessel1_headings'][] = $point1['heading'] ?? 0;
-                        $analysis['vessel2_headings'][] = $point2['heading'] ?? 0;
-                        
-                        // Track proximity
-                        if ($distance <= self::PROXIMITY_THRESHOLD_NM) {
+                        if ($distance <= ALLOWED_STS_RANGE_NM) {
                             $closeProximityCount++;
                             
                             // Set start date if not already set
                             if (empty($analysis['start_date'])) {
                                 $analysis['start_date'] = $point1['last_position_UTC'];
                                 $analysis['lock_time'] = $point2['last_position_epoch'];
-                                
-                                // Timeline: Proximity established
-                                if (!$proximityEstablished) {
-                                    $analysis['proximity_start'] = $point1['last_position_UTC'];
-                                    $proximityEstablished = true;
-                                }
-                            }
-                            
-                            // Check for slow speed
-                            if (($point1['speed'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
-                                ($point2['speed'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
-                                !$slowSpeedConfirmed) {
-                                $analysis['slow_speed_start'] = $point1['last_position_UTC'];
-                                $slowSpeedConfirmed = true;
-                            }
-                            
-                            // Check for parallel alignment
-                            $headingDiff = abs(($point1['heading'] ?? 0) - ($point2['heading'] ?? 0));
-                            $headingDiff = min($headingDiff, 360 - $headingDiff);
-                            if ($headingDiff <= self::HEADING_VARIANCE_THRESHOLD) {
-                                if ($alignmentStartTime === null) {
-                                    $alignmentStartTime = strtotime($point1['last_position_UTC']);
-                                } else {
-                                    $alignmentDuration = (strtotime($point1['last_position_UTC']) - $alignmentStartTime) / 60;
-                                    if ($alignmentDuration >= self::PARALLEL_ALIGNMENT_MINUTES && !$alignmentConfirmed) {
-                                        $analysis['alignment_start'] = $point1['last_position_UTC'];
-                                        $alignmentConfirmed = true;
-                                        $analysis['parallel_pattern_detected'] = true;
-                                    }
-                                }
-                            } else {
-                                $alignmentStartTime = null;
-                            }
-                            
-                            // Check for stable interaction
-                            if ($proximityEstablished && $slowSpeedConfirmed && $alignmentConfirmed && !$stableConfirmed) {
-                                $stableDuration = (strtotime($point1['last_position_UTC']) - strtotime($analysis['proximity_start'])) / 60;
-                                if ($stableDuration >= self::STABLE_INTERVAL_MINUTES) {
-                                    $analysis['stable_start'] = $analysis['proximity_start']; // From first confirmed position
-                                    $stableConfirmed = true;
-                                }
                             }
                         }
                         
@@ -886,31 +645,11 @@ class STSTransferDetector {
             }
         }
         
-        // Detect manoeuvre start (after stable phase)
-        if ($stableConfirmed && !$manoeuvreDetected) {
-            foreach ($history1['positions'] as $point1) {
-                if (strtotime($point1['last_position_UTC'] ?? 0) > strtotime($analysis['stable_start'])) {
-                    if (($point1['speed'] ?? 0) > self::SPEED_THRESHOLD_KNOTS) {
-                        $analysis['manoeuvre_start'] = $point1['last_position_UTC'];
-                        $manoeuvreDetected = true;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Detect separation
-        if ($stableConfirmed) {
-            $separationTime = $this->detectSeparation($history1, $history2, $analysis['stable_start']);
-            if ($separationTime) {
-                $analysis['separation_confirmed'] = $separationTime;
-            }
-        }
-        
         // Calculate proximity consistency
         if ($totalComparisons > 0) {
             $analysis['proximity_consistency'] = $closeProximityCount / $totalComparisons;
             if ($analysis['stationary_hours'] > ALLOWED_STS_MAX_TRANSFER_HOURS) {
+                //$analysis['stationary_hours'] = ALLOWED_STS_MAX_TRANSFER_HOURS;
                 $analysis['end_date'] = date('Y-m-d\TH:i:s\Z', strtotime($analysis['start_date']) + (ALLOWED_STS_MAX_TRANSFER_HOURS * 3600));
             }
 
@@ -926,339 +665,16 @@ class STSTransferDetector {
                 $analysis['end_date']
             );
             
-            // Check supporting signals
-            $analysis['draught_change_detected'] = $this->checkDraughtChange($vessel1, $vessel2);
-            $analysis['in_sts_zone'] = $this->checkSTSZone($vessel1['lat'] ?? 0, $vessel1['lon'] ?? 0) || 
-                                        $this->checkSTSZone($vessel2['lat'] ?? 0, $vessel2['lon'] ?? 0);
-            $analysis['vessel_types_support_sts'] = $this->checkVesselTypesSupportSTS($vessel1, $vessel2);
-            $analysis['historical_sts'] = $this->checkHistoricalSTS($vessel1, $vessel2);
-            
-            // Calculate max AIS gap
-            $analysis['max_ais_gap_minutes'] = $this->calculateMaxAISGap($history1, $history2);
-            
-            // Calculate position drift
-            $analysis['position_drift_m'] = $this->calculatePositionDrift($history1, $history2);
-            
-            // Get pre/post gap positions for reconstruction
-            $gapInfo = $this->getGapPositionInfo($history1, $history2);
-            $analysis['pre_gap_positions'] = $gapInfo['pre_gap'] ?? [];
-            $analysis['post_gap_positions'] = $gapInfo['post_gap'] ?? [];
-            $analysis['pre_gap_distance'] = $gapInfo['pre_gap_distance'] ?? null;
-            $analysis['post_gap_distance'] = $gapInfo['post_gap_distance'] ?? null;
-            
-            // Check for dark event during interaction (would come from Dark Detection engine)
-            // This would be populated by external data - placeholder for now
-            $analysis['dark_event_during_interaction'] = null;
-            $analysis['dark_in_sts_zone'] = false;
-            
-            // Detect STS using calibrated logic (based on core conditions, not strict criteria)
-            $coreConditionsMet = $this->evaluateCoreConditions($analysis);
-            $analysis['sts_detected'] = $coreConditionsMet;
-            
-            // Calculate confidence using calibrated logic
-            $confidenceEnum = $this->calculateConfidenceString($analysis);
-            $analysis['confidence_level'] = ($confidenceEnum === 'Medium') ? 'Moderate' : $confidenceEnum;
-            
-            // Map to transfer signal
-            $transferSignalMap = [
-                'High' => 'STS Confirmed',
-                'Medium' => 'STS Probable',
-                'Low' => 'Possible STS'
-            ];
-            $analysis['transfer_signal'] = $transferSignalMap[$confidenceEnum] ?? 'Possible STS';
-            
-            // Calculate AIS integrity
-            $analysis['ais_integrity'] = $this->calculateAISIntegrity($analysis);
-            
-            // Calculate interaction window duration
-            if ($analysis['stable_start'] && $analysis['separation_confirmed']) {
-                $analysis['interaction_window_duration'] = (strtotime($analysis['separation_confirmed']) - strtotime($analysis['stable_start'])) / 60;
-            }
-            
-            // Calculate interaction stability (UI only)
-            $analysis['interaction_stability'] = $this->calculateInteractionStability($analysis);
+            // Detect STS
+            $analysis['sts_detected'] = (
+                $analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM &&
+                $analysis['stationary_hours'] >= 6 &&
+                $analysis['proximity_consistency'] >= 0.7
+            );
         }
+        
         
         return $analysis;
-    }
-
-    /**
-     * Detect separation between vessels
-     */
-    private function detectSeparation($history1, $history2, $stableStart) {
-        $stableStartTime = strtotime($stableStart);
-        $separationDuration = 0;
-        $separationStartTime = null;
-        
-        // Sort positions chronologically
-        usort($history1, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
-        });
-        
-        usort($history2, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
-        });
-        
-        foreach ($history1 as $point1) {
-            $pointTime = strtotime($point1['last_position_UTC'] ?? 0);
-            if ($pointTime <= $stableStartTime) continue;
-            
-            foreach ($history2 as $point2) {
-                if (abs(strtotime($point2['last_position_UTC'] ?? 0) - $pointTime) > 600) continue;
-                
-                $distance = $this->calculateDistanceNM(
-                    $point1['lat'], $point1['lon'],
-                    $point2['lat'], $point2['lon']
-                );
-                
-                if ($distance > self::PROXIMITY_THRESHOLD_NM) {
-                    if ($separationStartTime === null) {
-                        $separationStartTime = $pointTime;
-                    }
-                    $separationDuration = ($pointTime - $separationStartTime) / 60;
-                    if ($separationDuration >= 10) { // ≥ 10 continuous minutes
-                        return $point1['last_position_UTC'];
-                    }
-                } else {
-                    $separationStartTime = null;
-                    $separationDuration = 0;
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * Calculate maximum AIS gap in minutes
-     */
-    private function calculateMaxAISGap($history1, $history2) {
-        $maxGap = 0;
-        
-        foreach ([$history1, $history2] as $history) {
-            $timestamps = [];
-            foreach ($history as $pos) {
-                $timestamps[] = strtotime($pos['last_position_UTC'] ?? 0);
-            }
-            sort($timestamps);
-            
-            for ($i = 1; $i < count($timestamps); $i++) {
-                $gap = ($timestamps[$i] - $timestamps[$i - 1]) / 60;
-                $maxGap = max($maxGap, $gap);
-            }
-        }
-        
-        return $maxGap;
-    }
-
-    /**
-     * Calculate position drift from median position
-     */
-    private function calculatePositionDrift($history1, $history2) {
-        $positions = [];
-        
-        foreach ($history1 as $pos) {
-            $positions[] = ['lat' => $pos['lat'], 'lon' => $pos['lon']];
-        }
-        foreach ($history2 as $pos) {
-            $positions[] = ['lat' => $pos['lat'], 'lon' => $pos['lon']];
-        }
-        
-        if (empty($positions)) {
-            return 0;
-        }
-        
-        // Calculate median position (simplified - average of all positions)
-        $sumLat = 0;
-        $sumLon = 0;
-        foreach ($positions as $pos) {
-            $sumLat += $pos['lat'];
-            $sumLon += $pos['lon'];
-        }
-        $medianLat = $sumLat / count($positions);
-        $medianLon = $sumLon / count($positions);
-        
-        // Calculate max drift from median
-        $maxDrift = 0;
-        foreach ($positions as $pos) {
-            $distance = $this->calculateDistanceNM($medianLat, $medianLon, $pos['lat'], $pos['lon']) * 1852; // Convert to meters
-            $maxDrift = max($maxDrift, $distance);
-        }
-        
-        return $maxDrift;
-    }
-
-    /**
-     * Get pre-gap and post-gap position information for reconstruction
-     */
-    private function getGapPositionInfo($history1, $history2) {
-        $result = [
-            'pre_gap' => [],
-            'post_gap' => [],
-            'pre_gap_distance' => null,
-            'post_gap_distance' => null
-        ];
-        
-        // Find the largest gap
-        $maxGap = 0;
-        $gapStart = null;
-        $gapEnd = null;
-        
-        $allTimestamps = [];
-        foreach ($history1 as $pos) {
-            $allTimestamps[strtotime($pos['last_position_UTC'] ?? 0)] = 'v1';
-        }
-        foreach ($history2 as $pos) {
-            $allTimestamps[strtotime($pos['last_position_UTC'] ?? 0)] = 'v2';
-        }
-        
-        ksort($allTimestamps);
-        $timestamps = array_keys($allTimestamps);
-        
-        for ($i = 1; $i < count($timestamps); $i++) {
-            $gap = ($timestamps[$i] - $timestamps[$i - 1]) / 60;
-            if ($gap > $maxGap) {
-                $maxGap = $gap;
-                $gapStart = $timestamps[$i - 1];
-                $gapEnd = $timestamps[$i];
-            }
-        }
-        
-        if ($maxGap > self::AIS_GAP_NO_PENALTY_MINUTES && $gapStart && $gapEnd) {
-            // Get positions before gap
-            foreach ($history1 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
-                if ($posTime <= $gapStart && $posTime >= $gapStart - 3600) { // Within 1 hour before gap
-                    $result['pre_gap'][] = $pos;
-                }
-            }
-            foreach ($history2 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
-                if ($posTime <= $gapStart && $posTime >= $gapStart - 3600) {
-                    $result['pre_gap'][] = $pos;
-                }
-            }
-            
-            // Get positions after gap
-            foreach ($history1 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
-                if ($posTime >= $gapEnd && $posTime <= $gapEnd + 3600) { // Within 1 hour after gap
-                    $result['post_gap'][] = $pos;
-                }
-            }
-            foreach ($history2 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
-                if ($posTime >= $gapEnd && $posTime <= $gapEnd + 3600) {
-                    $result['post_gap'][] = $pos;
-                }
-            }
-            
-            // Calculate pre-gap and post-gap distances
-            if (!empty($result['pre_gap'])) {
-                $v1Pre = null;
-                $v2Pre = null;
-                foreach ($result['pre_gap'] as $pos) {
-                    if (isset($pos['mmsi']) && $pos['mmsi'] == $history1[0]['mmsi']) {
-                        $v1Pre = $pos;
-                    } else {
-                        $v2Pre = $pos;
-                    }
-                }
-                if ($v1Pre && $v2Pre) {
-                    $result['pre_gap_distance'] = $this->calculateDistanceNM(
-                        $v1Pre['lat'], $v1Pre['lon'],
-                        $v2Pre['lat'], $v2Pre['lon']
-                    );
-                }
-            }
-            
-            if (!empty($result['post_gap'])) {
-                $v1Post = null;
-                $v2Post = null;
-                foreach ($result['post_gap'] as $pos) {
-                    if (isset($pos['mmsi']) && $pos['mmsi'] == $history1[0]['mmsi']) {
-                        $v1Post = $pos;
-                    } else {
-                        $v2Post = $pos;
-                    }
-                }
-                if ($v1Post && $v2Post) {
-                    $result['post_gap_distance'] = $this->calculateDistanceNM(
-                        $v1Post['lat'], $v1Post['lon'],
-                        $v2Post['lat'], $v2Post['lon']
-                    );
-                }
-            }
-        }
-        
-        return $result;
-    }
-
-    /**
-     * Check for draught change
-     */
-    private function checkDraughtChange($vessel1, $vessel2) {
-        $initialDraught1 = $this->getInitialDraught($vessel1['mmsi'] ?? null);
-        $initialDraught2 = $this->getInitialDraught($vessel2['mmsi'] ?? null);
-        
-        $currentDraught1 = $vessel1['draught'] ?? 0;
-        $currentDraught2 = $vessel2['draught'] ?? 0;
-        
-        $change1 = abs($currentDraught1 - $initialDraught1);
-        $change2 = abs($currentDraught2 - $initialDraught2);
-        
-        // Significant change threshold: 0.5 meters
-        return ($change1 >= 0.5 || $change2 >= 0.5);
-    }
-
-    /**
-     * Check if vessels are in STS zone
-     */
-    private function checkSTSZone($lat, $lon) {
-        // Nigerian STS zones (Bonny, PHC anchorage, Dawes Island)
-        $stsZones = [
-            ['lat_min' => 4.2, 'lat_max' => 4.5, 'lon_min' => 7.0, 'lon_max' => 7.3], // Bonny
-            ['lat_min' => 4.7, 'lat_max' => 4.9, 'lon_min' => 7.1, 'lon_max' => 7.3], // PHC
-            ['lat_min' => 4.5, 'lat_max' => 4.7, 'lon_min' => 7.2, 'lon_max' => 7.4]  // Dawes Island
-        ];
-        
-        foreach ($stsZones as $zone) {
-            if ($lat >= $zone['lat_min'] && $lat <= $zone['lat_max'] &&
-                $lon >= $zone['lon_min'] && $lon <= $zone['lon_max']) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    /**
-     * Check if vessel types support STS
-     */
-    private function checkVesselTypesSupportSTS($vessel1, $vessel2) {
-        $type1 = $vessel1['type'] ?? '';
-        $type2 = $vessel2['type'] ?? '';
-        
-        $stsCapableTypes = ['tanker', 'cargo', 'fso', 'fsu', 'shuttle', 'crude', 'oil'];
-        
-        $type1Support = false;
-        $type2Support = false;
-        
-        foreach ($stsCapableTypes as $capableType) {
-            if (stripos($type1, $capableType) !== false) $type1Support = true;
-            if (stripos($type2, $capableType) !== false) $type2Support = true;
-        }
-        
-        return $type1Support && $type2Support;
-    }
-
-    /**
-     * Check historical STS behaviour
-     */
-    private function checkHistoricalSTS($vessel1, $vessel2) {
-        // In production, this would query a database of historical STS events
-        // Placeholder implementation
-        return false;
     }
 
     /**
@@ -1266,8 +682,12 @@ class STSTransferDetector {
      */
     public function calculateTransferSignal($vessel1, $vessel2, $initialDraught1, $initialDraught2) {
         // Get current draughts
-        $currentDraught1 = $vessel1['draught'] ?? 0;
-        $currentDraught2 = $vessel2['draught'] ?? 0;
+
+        $vessel1 = get_datalastic_field( $vessel1['uuid']);
+        $vessel2 = get_datalastic_field( $vessel2['uuid']); 
+
+        $currentDraught1 = $vessel1['current_draught'] ?? 0;
+        $currentDraught2 = $vessel2['current_draught'] ?? 0;
 
         // Calculate draught changes
         $draughtChange1 = $currentDraught1 - $initialDraught1;
@@ -1697,48 +1117,7 @@ class STSTransferDetector {
     }
 
     /**
-     * Calculate interaction stability (UI display only - does not affect confidence)
-     */
-    private function calculateInteractionStability($analysis) {
-        if (empty($analysis['vessel1_headings']) || empty($analysis['vessel2_headings'])) {
-            return 'Not available';
-        }
-        
-        // Calculate heading variance
-        $headingStability = $this->checkHeadingStability($analysis);
-        
-        // Calculate positional drift
-        $driftWithinThreshold = ($analysis['position_drift_m'] ?? 0) <= self::POSITIONAL_DRIFT_THRESHOLD_M;
-        
-        // Calculate speed variation
-        $speedStable = $this->checkSpeedThreshold($analysis);
-        
-        if ($headingStability && $driftWithinThreshold && $speedStable) {
-            return 'High';
-        } elseif ($headingStability || $driftWithinThreshold || $speedStable) {
-            return 'Moderate';
-        } else {
-            return 'Low';
-        }
-    }
-
-    /**
-     * Calculate AIS integrity
-     */
-    private function calculateAISIntegrity($analysis) {
-        $maxGap = $analysis['max_ais_gap_minutes'] ?? 0;
-        
-        if ($maxGap < self::AIS_GAP_NO_PENALTY_MINUTES) {
-            return 'Stable';
-        } elseif ($maxGap < self::AIS_GAP_MILD_PENALTY_MINUTES) {
-            return 'Minor gaps';
-        } else {
-            return 'Reconstructed';
-        }
-    }
-
-    /**
-     * Generate comprehensive STS report with calibrated confidence
+     * Generate comprehensive STS report
      */
     private function generateSTSReport($analysis, $vessel1, $vessel2) {
         $cargoType1 = $this->predictCargoType($vessel1);
@@ -1751,22 +1130,31 @@ class STSTransferDetector {
             $analysis['current_distance_nm']
         );
         
-        // Use pre-calculated confidence values from analysis
-        $confidenceLevel = $analysis['confidence_level'] ?? 'Low';
-        $confidenceEnum = ($confidenceLevel === 'Moderate') ? 'Medium' : $confidenceLevel;
-        $transferSignal = $analysis['transfer_signal'] ?? 'Possible STS';
+        $confidence = $this->calculateConfidence(
+            $analysis['data_points_analyzed'],
+            $analysis['proximity_consistency'],
+            $analysis['stationary_hours']
+        );
+
+        $confidenceString = $this->calculateConfidenceString($analysis);
         
         // Assess Draught Evidence
         $draughtEvidence = $this->assessDraughtEvidence($vessel1, $vessel2);
         
         // Get transfer signal if draught evidence is available
-        $transferSignalDetail = null;
+        $transferSignal = null;
         if ($draughtEvidence === 'Available') {
             $initialDraught1 = $this->getInitialDraught($vessel1['mmsi'] ?? null);
             $initialDraught2 = $this->getInitialDraught($vessel2['mmsi'] ?? null);
-            $transferSignalDetail = $this->calculateTransferSignal($vessel1, $vessel2, $initialDraught1, $initialDraught2);
+            $transferSignal = $this->calculateTransferSignal($vessel1, $vessel2, $initialDraught1, $initialDraught2);
         }
 
+        // Get additional required fields
+        // $zoneTerminalName = $this->getZoneTerminalName(
+        //     $vessel1['position']['lat'] ?? 0,
+        //     $vessel1['position']['lon'] ?? 0
+        // );
+        
         $vesselCondition1 = $this->getVesselCondition($vessel1);
         $vesselCondition2 = $this->getVesselCondition($vessel2);
         
@@ -1780,7 +1168,6 @@ class STSTransferDetector {
         $operationStatus = $this->getOperationStatus($analysis);
         
         $remarks = $this->generateRemarks($analysis, $vessel1, $vessel2, $cargoType1, $cargoType2);
-        
         // Get minutes since last signal
         $minutesSinceSignal1 = $this->getMinutesSinceLastSignal($vessel1);
         $minutesSinceSignal2 = $this->getMinutesSinceLastSignal($vessel2);
@@ -1788,9 +1175,9 @@ class STSTransferDetector {
         // Get detailed AIS status
         $aisStatus1 = $this->getAISStatus($minutesSinceSignal1);
         $aisStatus2 = $this->getAISStatus($minutesSinceSignal2);
-        
         return [
             'sts_transfer_detected' => $analysis['sts_detected'],
+            // 'zone_terminal_name' => $zoneTerminalName,
             'operation_mode' => $operationMode,
             'status' => $operationStatus,
             'vessel_1' => [
@@ -1803,10 +1190,10 @@ class STSTransferDetector {
                 'cargo_eta' => $cargoETA1,
                 'vessel_owner' => $vesselOwner1,
                 'ais_continuity' => $analysis['ais_continuity_v1'],
-                'ais_status' => $aisStatus1,
+                'ais_status' => $aisStatus1, // Add detailed AIS status
                 'last_signal_age_minutes' => round($minutesSinceSignal1, 1),
                 'position_freshness' => $this->getPositionFreshness($minutesSinceSignal1),
-                'force_visible' => $analysis['sts_detected']
+                'force_visible' => $analysis['sts_detected'] // Should be forced visible on map
             ],
             'vessel_2' => [
                 'name' => $vessel2['name'] ?? 'Unknown',
@@ -1818,10 +1205,10 @@ class STSTransferDetector {
                 'cargo_eta' => $cargoETA2,
                 'vessel_owner' => $vesselOwner2,
                 'ais_continuity' => $analysis['ais_continuity_v2'],
-                'ais_status' => $aisStatus2,
+                'ais_status' => $aisStatus2, // Add detailed AIS status
                 'last_signal_age_minutes' => round($minutesSinceSignal2, 1),
                 'position_freshness' => $this->getPositionFreshness($minutesSinceSignal2),
-                'force_visible' => $analysis['sts_detected']
+                'force_visible' => $analysis['sts_detected'] // Should be forced visible on map
             ],
             'proximity_analysis' => [
                 'current_distance_nm' => round($analysis['current_distance_nm'], 3),
@@ -1836,31 +1223,12 @@ class STSTransferDetector {
                 'proximity_signal' => $analysis['proximity_signal'],
                 'draught_evidence' => $draughtEvidence
             ],
-            'transfer_signal' => $transferSignalDetail,
+            'transfer_signal' => $transferSignal,
             'risk_assessment' => [
                 'risk_level' => $riskLevel,
-                'confidence' => $confidenceLevel, // Display label (High/Moderate/Low)
-                'confidence_enum' => $confidenceEnum, // Internal enum (high/medium/low)
-                'transfer_signal' => $transferSignal, // STS Confirmed / STS Probable / Possible STS
+                'confidence' => number_format($confidence, 2,'.', ''),
+                'confidence_string' => $confidenceString,
                 'remarks' => $remarks
-            ],
-            'timeline' => [
-                'proximity_start' => $analysis['proximity_start'],
-                'slow_speed_start' => $analysis['slow_speed_start'],
-                'alignment_start' => $analysis['alignment_start'],
-                'stable_start' => $analysis['stable_start'],
-                'manoeuvre_start' => $analysis['manoeuvre_start'],
-                'separation_confirmed' => $analysis['separation_confirmed']
-            ],
-            'engine_outputs' => [
-                'confidence_level' => $confidenceLevel,
-                'transfer_signal' => $transferSignal,
-                'stable_start' => $analysis['stable_start'],
-                'separation_confirmed' => $analysis['separation_confirmed'],
-                'ais_integrity' => $analysis['ais_integrity'],
-                'interaction_window_duration' => $analysis['interaction_window_duration'],
-                'interaction_stability' => $analysis['interaction_stability'],
-                'dark_event_during_interaction' => $analysis['dark_event_during_interaction']
             ],
             'lock_time' => $analysis['lock_time'],
             'start_date' => empty($analysis['start_date'])?date('Y-m-d H:i:s'):$analysis['start_date'],
@@ -1868,8 +1236,8 @@ class STSTransferDetector {
             'end_date' => $analysis['end_date'],
             'timestamp' => date('c'),
             'criteria_met' => [
-                'distance_≤_1_km' => $analysis['current_distance_nm'] <= self::PROXIMITY_THRESHOLD_NM,
-                'stationary_≥_2_hours' => $analysis['stationary_hours'] >= self::HIGH_CONFIDENCE_DURATION_HOURS,
+                'distance_≤_200_m' => $analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM,
+                'stationary_≥_6_hours' => $analysis['stationary_hours'] >= 6,
                 'consistent_proximity' => $analysis['proximity_consistency'] >= 0.7
             ]
         ];
@@ -1916,17 +1284,14 @@ class STSTransferDetector {
             $remarks[] = "STS TRANSFER LIKELY IN PROGRESS";
         }
         
-        if ($analysis['current_distance_nm'] <= self::PROXIMITY_THRESHOLD_NM) {
-            $remarks[] = "Vessels within STS operational distance (<1 km)";
+        if ($analysis['current_distance_nm'] <= ALLOWED_STS_RANGE_NM) {
+            $remarks[] = "Vessels within STS operational distance";
         } else {
             $remarks[] = "Vessels outside typical STS distance";
         }
         
-        $durationHours = $analysis['stationary_hours'];
-        if ($durationHours >= self::HIGH_CONFIDENCE_DURATION_HOURS) {
-            $remarks[] = "Extended stationary period (≥2 hours) suggests transfer operations";
-        } elseif ($durationHours >= (self::MODERATE_CONFIDENCE_DURATION_MINUTES / 60)) {
-            $remarks[] = "Moderate stationary period suggests possible transfer operations";
+        if ($analysis['stationary_hours'] >= 5) {
+            $remarks[] = "Extended stationary period suggests transfer operations";
         }
         
         if ($cargo1 === 'Crude Oil' && $cargo2 === 'Crude Oil') {
@@ -1937,62 +1302,49 @@ class STSTransferDetector {
             $remarks[] = "Consistent proximity supports STS hypothesis";
         }
 
-        // Add AIS continuity remarks (calibrated for Nigerian waters)
+        // Add AIS continuity remarks
         if ($analysis['ais_continuity_v1'] === 'Good' && $analysis['ais_continuity_v2'] === 'Good') {
             $remarks[] = "Both vessels have good AIS continuity";
-        } elseif ($analysis['max_ais_gap_minutes'] < self::AIS_GAP_NO_PENALTY_MINUTES) {
-            $remarks[] = "Minor AIS gaps detected - within acceptable range for Nigerian waters";
-        } elseif ($analysis['max_ais_gap_minutes'] < self::AIS_GAP_MILD_PENALTY_MINUTES) {
-            $remarks[] = "Moderate AIS gaps - behavioural pattern remains consistent";
-        } elseif ($analysis['max_ais_gap_minutes'] >= self::AIS_GAP_MILD_PENALTY_MINUTES) {
-            $remarks[] = "Significant AIS gaps - pattern reconstructed from surrounding data";
+        } elseif ($analysis['ais_continuity_v1'] === 'Weak' || $analysis['ais_continuity_v2'] === 'Weak') {
+            $remarks[] = "Limited AIS continuity may affect accuracy";
+        } elseif ($analysis['ais_continuity_v1'] === 'Delayed' || $analysis['ais_continuity_v2'] === 'Delayed') {
+            $remarks[] = "Delayed AIS continuity may affect accuracy";
+        } elseif ($analysis['ais_continuity_v1'] === 'Lost/Dark' || $analysis['ais_continuity_v2'] === 'Lost/Dark') {
+            $remarks[] = "Lost/Dark AIS continuity may affect accuracy";
         }
         
         // Add proximity signal remarks
         if ($analysis['proximity_signal'] === 'Sustained') {
             $remarks[] = "Sustained proximity signal detected";
         } elseif ($analysis['proximity_signal'] === 'Interrupted') {
-            $remarks[] = "Proximity signal interrupted - possible AIS gaps (expected in Nigerian waters)";
+            $remarks[] = "Proximity signal interrupted - possible AIS gaps";
         }
 
         // Add confidence-based remarks
-        $confidence = $analysis['confidence_level'] ?? 'Low';
-        $confidenceEnum = ($confidence === 'Moderate') ? 'Medium' : $confidence;
-        
-        switch ($confidenceEnum) {
+        $confidence = $this->calculateConfidenceString($analysis);
+        switch ($confidence) {
             case 'High':
-                $remarks[] = "High confidence - core behavioural conditions met with supporting signals";
+                $remarks[] = "High confidence due to continuous AIS data and sustained proximity";
                 break;
             case 'Medium':
-                $remarks[] = "Moderate confidence - core behavioural conditions met, limited supporting signals";
+                $remarks[] = "Medium confidence due to intermittent AIS data or weak evidence";
                 break;
             case 'Low':
-                $remarks[] = "Low confidence - insufficient behavioural evidence";
+                $remarks[] = "Low confidence due to significant AIS gaps or interrupted proximity";
                 break;
-        }
-        
-        // Add draught remark (neutral when absent)
-        if (!$analysis['draught_change_detected']) {
-            $remarks[] = "No draught change data - neutral factor (common in Nigerian waters)";
-        } else {
-            $remarks[] = "Draught change detected - confirming signal";
-        }
-        
-        // Add zone remark if applicable
-        if ($analysis['in_sts_zone']) {
-            $remarks[] = "Vessels within designated STS zone/anchorage";
-        }
-        
-        // Add vessel type remark
-        if ($analysis['vessel_types_support_sts']) {
-            $remarks[] = "Vessel types support STS operation";
-        }
-        
-        // Add reconstruction remark if applicable
-        if ($analysis['ais_integrity'] === 'Reconstructed') {
-            $remarks[] = "Interaction window reconstructed across AIS gap";
         }
         
         return implode('. ', $remarks);
     }
 }
+
+// // Usage
+// $apiKey = '15df4420-d28b-4b26-9f01-13cca621d55e';
+// $detector = new STSTransferDetector($apiKey);   
+
+// // Check for STS transfer between two vessels
+// $result = $detector->detectSTSTransfer('123456789', '987654321');
+
+// echo "<pre>";
+// print_r($result);
+// echo "</pre>";
