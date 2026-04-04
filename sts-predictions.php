@@ -56,33 +56,95 @@ class STSTransferDetector {
      * Get vessel historical positions
      */
     private function getVesselHistory($mmsi, $hours = 24) {
-        $endpoint = $this->baseUrl . '/vessel_history';
-        $params = [
-            'api-key' => $this->apiKey,
-            'mmsi' => $mmsi,
-            'from' => date('Y-m-d', strtotime("-$hours hours")),
-            'to' => date('Y-m-d')
-        ];
-        
-        $url = $endpoint . '?' . http_build_query($params);
-        
         $ch = curl_init();
+        
+        $filter = "posDt BETWEEN '" . date('Y-m-d H:i:s', strtotime("-$hours hours")) . "' AND '" . date('Y-m-d H:i:s') . "' and mmsi=" . $mmsi;
+        
         curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
+            CURLOPT_URL            => "https://api.kpler.com/v2/maritime/ais-historical?filter=" . urlencode($filter),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => 'GET',
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Basic ' . $this->apiKey,
+            ],
         ]);
         
         $response = curl_exec($ch);
+
+        if (curl_errno($ch)) {
+            throw new Exception('cURL Error: ' . curl_error($ch));
+        }
+        
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         
-        if ($httpCode === 200) {
-            $data = json_decode($response, true);
-            return $data['data'] ?? [];
+        if ($httpCode >= 400) {
+            throw new Exception("HTTP Error: " . $httpCode . " - " . $response);
         }
         
-        return [];
+        $data = json_decode($response, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception("JSON Decode Error: " . json_last_error_msg());
+        }
+        
+        $features = $data["features"] ?? [];
+        $positions = [];
+        
+        foreach ($features as $feature) {
+            $properties = $feature['properties'] ?? [];
+            $geometry = $feature['geometry'] ?? [];
+            $coordinates = $geometry['coordinates'] ?? [];
+            
+            if (empty($properties['posDt']) || empty($coordinates)) {
+                continue;
+            }
+            
+            $positions[] = [
+                'vesselUid'=> $properties['vesselUid'] ?? null, 
+                'vesselName'=> $properties['vesselName'] ?? null, 
+                'navigation_status'=> $properties['navStatus'] ?? null, 
+                'sog'=> $properties['sog'] ?? null, 
+                'dwt'=> $properties['dwt'] ?? null, 
+                'mmsi'=> $properties['mmsi'] ?? null, 
+                'length'=> $properties['length'] ?? null, 
+                'imo'=> $properties['imo'] ?? null, 
+                'longitude'=> $properties['longitude'] ?? null, 
+                'latitude'=> $properties['latitude'] ?? null,  
+                'cog'=> $properties['cog'] ?? null, 
+                'rot'=> $properties['rot'] ?? null,  
+                'heading'=> $properties['heading'] ?? null, 
+                'navStatus'=> $properties['navStatus'] ?? null,  
+                'posMsgType'=> $properties['posMsgType'] ?? null,  
+                'posSrc'=> $properties['posSrc'] ?? null,  
+                'callsign'=> $properties['callsign'] ?? null,  
+                'flag'=> $properties['flag'] ?? null,  
+                'vesselTypeAis'=> $properties['vesselTypeAis'] ?? null,  
+                'vesselType'=> $properties['vesselType'] ?? null,  
+                'width'=> $properties['width'] ?? null, 
+                'grt'=> $properties['grt'] ?? null,  
+                'destination'=> $properties['destination'] ?? null, 
+                'eta'=> $properties['eta'] ?? null,  
+                'draught'=> $properties['draught'] ?? null,  
+                'staticMsgType'=> $properties['staticMsgType'] ?? null,  
+                'staticSrc'=> $properties['staticSrc'] ?? null,  
+                'timestamp' => $properties['posDt'] ?? null, 
+                'posDt'=> $properties['posDt'] ?? null,
+                'posDt_time'=> strtotime($properties['posDt']) ?? 0
+            ];
+        }
+        
+        // Sort by timestamp
+        usort($positions, function($a, $b) {
+            return strtotime($a['timestamp']) <=> strtotime($b['timestamp']);
+        });
+       
+        return $positions;
+
     }
     
     /**
@@ -120,41 +182,6 @@ class STSTransferDetector {
     }
     
     /**
-     * Get zone/terminal name based on position
-     */
-    public function getZoneTerminalName($lat, $lon) {
-        
-        $endpoint = $this->baseUrl . '/port_find';
-        $params = [
-            'api-key' => $this->apiKey,
-            'lat' => $lat,
-            'lon' => $lon,
-            'radius' => 10
-        ];
-        
-        $url = $endpoint . '?' . http_build_query($params);
-        
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 30,
-        ]);
-        
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        $data = json_decode($response, true);
-        
-        if( isset( $data['data'] ) && is_array( $data['data'] ) && count( $data['data'] ) > 0 ) {
-            return $data['data'][0]['port_name'];
-        }
-        
-        return '';
-    }
-    
-    /**
      * Determine vessel condition based on age and maintenance
      */
     private function getVesselCondition($vesselData) {
@@ -176,7 +203,7 @@ class STSTransferDetector {
      */
     private function estimateCargoETA($vesselData) {
         // Simplified ETA calculation
-        $speed = $vesselData['speed'] ?? 0;
+        $speed = $vesselData['sog'] ?? 0;
         $draught = $vesselData['draught'] ?? 0;
         
         if ($speed <= 0) return 0;
@@ -235,7 +262,7 @@ class STSTransferDetector {
             if (!$vessel1 || !$vessel2) {
                 throw new Exception("Could not retrieve vessel information");
             }
-            
+
             // Get historical data (last 24 hours)
             $history1 = $this->getVesselHistory($vessel1['mmsi'], 24);
             $history2 = $this->getVesselHistory($vessel2['mmsi'], 24);
@@ -488,11 +515,11 @@ class STSTransferDetector {
         
         // Sort by timestamp (newest first)
         usort($history1, function($a, $b) {
-            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
+            return strtotime($b['posDt'] ?? 0) <=> strtotime($a['posDt'] ?? 0);
         });
         
         usort($history2, function($a, $b) {
-            return strtotime($b['last_position_UTC'] ?? 0) <=> strtotime($a['last_position_UTC'] ?? 0);
+            return strtotime($b['posDt'] ?? 0) <=> strtotime($a['posDt'] ?? 0);
         });
         
         // Check for movement or distance increase
@@ -503,27 +530,27 @@ class STSTransferDetector {
             $next2 = $history2[$i + 1];
             
             $currentDistance = $this->calculateDistanceNM(
-                $current1['lat'], $current1['lon'],
-                $current2['lat'], $current2['lon']
+                $current1['latitude'], $current1['longitude'],
+                $current2['latitude'], $current2['longitude']
             );
             
             $nextDistance = $this->calculateDistanceNM(
-                $next1['lat'], $next1['lon'],
-                $next2['lat'], $next2['lon']
+                $next1['latitude'], $next1['longitude'],
+                $next2['latitude'], $next2['longitude']
             );
             
             // Check if vessels are moving apart
             if ($nextDistance > $currentDistance + 0.1) { // Increased by more than 0.1 NM
-                $endTime = $next1['last_position_UTC'];
+                $endTime = $next1['posDt'];
                 break;
             }
             
             // Check if either vessel starts moving
-            $currentSpeedAvg = (($current1['speed'] ?? 0) + ($current2['speed'] ?? 0)) / 2;
-            $nextSpeedAvg = (($next1['speed'] ?? 0) + ($next2['speed'] ?? 0)) / 2;
+            $currentSpeedAvg = (($current1['sog'] ?? 0) + ($current2['sog'] ?? 0)) / 2;
+            $nextSpeedAvg = (($next1['sog'] ?? 0) + ($next2['sog'] ?? 0)) / 2;
             
             if ($currentSpeedAvg < 1 && $nextSpeedAvg >= 1) {
-                $endTime = $next1['last_position_UTC'];
+                $endTime = $next1['posDt'];
                 break;
             }
         }
@@ -568,13 +595,13 @@ class STSTransferDetector {
         
         // Sort positions by timestamp (newest first to get latest position)
         usort($positions, function($a, $b) {
-            $timeA = strtotime($a['last_position_UTC'] ?? $a['last_position_epoch'] ?? 0);
-            $timeB = strtotime($b['last_position_UTC'] ?? $b['last_position_epoch'] ?? 0);
+            $timeA = strtotime($a['posDt'] ?? $a['posDt_time'] ?? 0);
+            $timeB = strtotime($b['posDt'] ?? $b['posDt_time'] ?? 0);
             return $timeB <=> $timeA; // Descending order (newest first)
         });
         
         // Get the most recent position timestamp
-        $latestPositionTime = strtotime($positions[0]['last_position_UTC'] ?? $positions[0]['last_position_epoch'] ?? 0);
+        $latestPositionTime = strtotime($positions[0]['posDt'] ?? $positions[0]['posDt_time'] ?? 0);
         
         // If no time window specified, use current time as reference
         if (!$endTime) {
@@ -613,27 +640,27 @@ class STSTransferDetector {
         
         // Sort positions by timestamp
         usort($vessel1Positions, function($a, $b) {
-            $timeA = strtotime($a['last_position_UTC'] ?? $a['last_position_epoch'] ?? 0);
-            $timeB = strtotime($b['last_position_UTC'] ?? $b['last_position_epoch'] ?? 0);
+            $timeA = strtotime($a['posDt'] ?? $a['posDt_time'] ?? 0);
+            $timeB = strtotime($b['posDt'] ?? $b['posDt_time'] ?? 0);
             return $timeA <=> $timeB;
         });
         
         usort($vessel2Positions, function($a, $b) {
-            $timeA = strtotime($a['last_position_UTC'] ?? $a['last_position_epoch'] ?? 0);
-            $timeB = strtotime($b['last_position_UTC'] ?? $b['last_position_epoch'] ?? 0);
+            $timeA = strtotime($a['posDt'] ?? $a['posDt_time'] ?? 0);
+            $timeB = strtotime($b['posDt'] ?? $b['posDt_time'] ?? 0);
             return $timeA <=> $timeB;
         });
         
         // Create time-indexed arrays for easier comparison
         $v1ByTime = [];
         foreach ($vessel1Positions as $pos) {
-            $time = strtotime($pos['last_position_UTC'] ?? $pos['last_position_epoch'] ?? 0);
+            $time = strtotime($pos['posDt'] ?? $pos['posDt_time'] ?? 0);
             $v1ByTime[$time] = $pos;
         }
         
         $v2ByTime = [];
         foreach ($vessel2Positions as $pos) {
-            $time = strtotime($pos['last_position_UTC'] ?? $pos['last_position_epoch'] ?? 0);
+            $time = strtotime($pos['posDt'] ?? $pos['posDt_time'] ?? 0);
             $v2ByTime[$time] = $pos;
         }
         
@@ -668,12 +695,12 @@ class STSTransferDetector {
             if (isset($v1ByTime[$time]) && isset($v2ByTime[$time])) {
                 $pos1 = $v1ByTime[$time];
                 $pos2 = $v2ByTime[$time];
-                if( !isset($pos1['lat']) || !isset($pos1['lon']) || !isset($pos2['lat']) || !isset($pos2['lon']) ){
+                if( !isset($pos1['latitude']) || !isset($pos1['longitude']) || !isset($pos2['latitude']) || !isset($pos2['longitude']) ){
                     continue;
                 }
                 $distance = $this->calculateDistanceNM(
-                    $pos1['lat'], $pos1['lon'],
-                    $pos2['lat'], $pos2['lon']
+                    $pos1['latitude'], $pos1['longitude'],
+                    $pos2['latitude'], $pos2['longitude']
                 );
                 
                 $totalComparisons++;
@@ -769,14 +796,14 @@ class STSTransferDetector {
         }
         
         $analysis['current_distance_nm'] = $this->calculateDistanceNM(
-            $vessel1['lat'], $vessel1['lon'],
-            $vessel2['lat'], $vessel2['lon']
+            $vessel1['latitude'], $vessel1['longitude'],
+            $vessel2['latitude'], $vessel2['longitude']
         );
         
         // Calculate stationary hours properly
         $stationaryAnalysis = $this->calculateStationaryHours(
-            $history1['positions'] ?? [],
-            $history2['positions'] ?? []
+            $history1 ?? [],
+            $history2 ?? []
         );
         
         $analysis['stationary_hours'] = $stationaryAnalysis['total_stationary_hours'];
@@ -808,22 +835,23 @@ class STSTransferDetector {
         $allPositions1 = [];
         $allPositions2 = [];
         
-        foreach ($history1['positions'] as $point1) {
+        foreach ($history1 as $point1) {
             $allPositions1[] = $point1;
-            foreach ($history2['positions'] as $point2) {
+            foreach ($history2 as $point2) {
                 $allPositions2[] = $point2;
+
                 if (is_array($point1) && is_array($point2)) {
-                    $timeDiff = abs(strtotime($point1['last_position_epoch'] ?? 0) - strtotime($point2['last_position_epoch'] ?? 0));
+                    $timeDiff = abs(strtotime($point1['posDt_time'] ?? 0) - strtotime($point2['posDt_time'] ?? 0));
                     
                     if ($timeDiff <= 600) { // 10 minutes
                         $distance = $this->calculateDistanceNM(
-                            $point1['lat'], $point1['lon'],
-                            $point2['lat'], $point2['lon']
+                            $point1['latitude'], $point1['longitude'],
+                            $point2['latitude'], $point2['longitude']
                         );
                         
                         // Collect behavioural data
-                        $analysis['vessel1_speeds'][] = $point1['speed'] ?? 0;
-                        $analysis['vessel2_speeds'][] = $point2['speed'] ?? 0;
+                        $analysis['vessel1_speeds'][] = $point1['sog'] ?? 0;
+                        $analysis['vessel2_speeds'][] = $point2['sog'] ?? 0;
                         $analysis['vessel1_headings'][] = $point1['heading'] ?? 0;
                         $analysis['vessel2_headings'][] = $point2['heading'] ?? 0;
                         
@@ -833,21 +861,21 @@ class STSTransferDetector {
                             
                             // Set start date if not already set
                             if (empty($analysis['start_date'])) {
-                                $analysis['start_date'] = $point1['last_position_UTC'];
-                                $analysis['lock_time'] = $point2['last_position_epoch'];
+                                $analysis['start_date'] = $point1['posDt'];
+                                $analysis['lock_time'] = $point2['posDt_time'];
                                 
                                 // Timeline: Proximity established
                                 if (!$proximityEstablished) {
-                                    $analysis['proximity_start'] = $point1['last_position_UTC'];
+                                    $analysis['proximity_start'] = $point1['posDt'];
                                     $proximityEstablished = true;
                                 }
                             }
                             
                             // Check for slow speed
-                            if (($point1['speed'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
-                                ($point2['speed'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
+                            if (($point1['sog'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
+                                ($point2['sog'] ?? 0) <= self::SPEED_THRESHOLD_KNOTS && 
                                 !$slowSpeedConfirmed) {
-                                $analysis['slow_speed_start'] = $point1['last_position_UTC'];
+                                $analysis['slow_speed_start'] = $point1['posDt'];
                                 $slowSpeedConfirmed = true;
                             }
                             
@@ -856,11 +884,11 @@ class STSTransferDetector {
                             $headingDiff = min($headingDiff, 360 - $headingDiff);
                             if ($headingDiff <= self::HEADING_VARIANCE_THRESHOLD) {
                                 if ($alignmentStartTime === null) {
-                                    $alignmentStartTime = strtotime($point1['last_position_UTC']);
+                                    $alignmentStartTime = strtotime($point1['posDt']);
                                 } else {
-                                    $alignmentDuration = (strtotime($point1['last_position_UTC']) - $alignmentStartTime) / 60;
+                                    $alignmentDuration = (strtotime($point1['posDt']) - $alignmentStartTime) / 60;
                                     if ($alignmentDuration >= self::PARALLEL_ALIGNMENT_MINUTES && !$alignmentConfirmed) {
-                                        $analysis['alignment_start'] = $point1['last_position_UTC'];
+                                        $analysis['alignment_start'] = $point1['posDt'];
                                         $alignmentConfirmed = true;
                                         $analysis['parallel_pattern_detected'] = true;
                                     }
@@ -871,7 +899,7 @@ class STSTransferDetector {
                             
                             // Check for stable interaction
                             if ($proximityEstablished && $slowSpeedConfirmed && $alignmentConfirmed && !$stableConfirmed) {
-                                $stableDuration = (strtotime($point1['last_position_UTC']) - strtotime($analysis['proximity_start'])) / 60;
+                                $stableDuration = (strtotime($point1['posDt']) - strtotime($analysis['proximity_start'])) / 60;
                                 if ($stableDuration >= self::STABLE_INTERVAL_MINUTES) {
                                     $analysis['stable_start'] = $analysis['proximity_start']; // From first confirmed position
                                     $stableConfirmed = true;
@@ -888,10 +916,10 @@ class STSTransferDetector {
         
         // Detect manoeuvre start (after stable phase)
         if ($stableConfirmed && !$manoeuvreDetected) {
-            foreach ($history1['positions'] as $point1) {
-                if (strtotime($point1['last_position_UTC'] ?? 0) > strtotime($analysis['stable_start'])) {
-                    if (($point1['speed'] ?? 0) > self::SPEED_THRESHOLD_KNOTS) {
-                        $analysis['manoeuvre_start'] = $point1['last_position_UTC'];
+            foreach ($history1 as $point1) {
+                if (strtotime($point1['posDt'] ?? 0) > strtotime($analysis['stable_start'])) {
+                    if (($point1['sog'] ?? 0) > self::SPEED_THRESHOLD_KNOTS) {
+                        $analysis['manoeuvre_start'] = $point1['posDt'];
                         $manoeuvreDetected = true;
                         break;
                     }
@@ -928,8 +956,8 @@ class STSTransferDetector {
             
             // Check supporting signals
             $analysis['draught_change_detected'] = $this->checkDraughtChange($vessel1, $vessel2);
-            $analysis['in_sts_zone'] = $this->checkSTSZone($vessel1['lat'] ?? 0, $vessel1['lon'] ?? 0) || 
-                                        $this->checkSTSZone($vessel2['lat'] ?? 0, $vessel2['lon'] ?? 0);
+            $analysis['in_sts_zone'] = $this->checkSTSZone($vessel1['latitude'] ?? 0, $vessel1['longitude'] ?? 0) || 
+                                        $this->checkSTSZone($vessel2['latitude'] ?? 0, $vessel2['longitude'] ?? 0);
             $analysis['vessel_types_support_sts'] = $this->checkVesselTypesSupportSTS($vessel1, $vessel2);
             $analysis['historical_sts'] = $this->checkHistoricalSTS($vessel1, $vessel2);
             
@@ -992,23 +1020,23 @@ class STSTransferDetector {
         
         // Sort positions chronologically
         usort($history1, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+            return strtotime($a['posDt'] ?? 0) <=> strtotime($b['posDt'] ?? 0);
         });
         
         usort($history2, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+            return strtotime($a['posDt'] ?? 0) <=> strtotime($b['posDt'] ?? 0);
         });
         
         foreach ($history1 as $point1) {
-            $pointTime = strtotime($point1['last_position_UTC'] ?? 0);
+            $pointTime = strtotime($point1['posDt'] ?? 0);
             if ($pointTime <= $stableStartTime) continue;
             
             foreach ($history2 as $point2) {
-                if (abs(strtotime($point2['last_position_UTC'] ?? 0) - $pointTime) > 600) continue;
+                if (abs(strtotime($point2['posDt'] ?? 0) - $pointTime) > 600) continue;
                 
                 $distance = $this->calculateDistanceNM(
-                    $point1['lat'], $point1['lon'],
-                    $point2['lat'], $point2['lon']
+                    $point1['latitude'], $point1['longitude'],
+                    $point2['latitude'], $point2['longitude']
                 );
                 
                 if ($distance > self::PROXIMITY_THRESHOLD_NM) {
@@ -1017,7 +1045,7 @@ class STSTransferDetector {
                     }
                     $separationDuration = ($pointTime - $separationStartTime) / 60;
                     if ($separationDuration >= 10) { // ≥ 10 continuous minutes
-                        return $point1['last_position_UTC'];
+                        return $point1['posDt'];
                     }
                 } else {
                     $separationStartTime = null;
@@ -1038,7 +1066,7 @@ class STSTransferDetector {
         foreach ([$history1, $history2] as $history) {
             $timestamps = [];
             foreach ($history as $pos) {
-                $timestamps[] = strtotime($pos['last_position_UTC'] ?? 0);
+                $timestamps[] = strtotime($pos['posDt'] ?? 0);
             }
             sort($timestamps);
             
@@ -1058,10 +1086,10 @@ class STSTransferDetector {
         $positions = [];
         
         foreach ($history1 as $pos) {
-            $positions[] = ['lat' => $pos['lat'], 'lon' => $pos['lon']];
+            $positions[] = ['latitude' => $pos['latitude'], 'longitude' => $pos['longitude']];
         }
         foreach ($history2 as $pos) {
-            $positions[] = ['lat' => $pos['lat'], 'lon' => $pos['lon']];
+            $positions[] = ['latitude' => $pos['latitude'], 'longitude' => $pos['longitude']];
         }
         
         if (empty($positions)) {
@@ -1072,8 +1100,8 @@ class STSTransferDetector {
         $sumLat = 0;
         $sumLon = 0;
         foreach ($positions as $pos) {
-            $sumLat += $pos['lat'];
-            $sumLon += $pos['lon'];
+            $sumLat += $pos['latitude'];
+            $sumLon += $pos['longitude'];
         }
         $medianLat = $sumLat / count($positions);
         $medianLon = $sumLon / count($positions);
@@ -1081,7 +1109,7 @@ class STSTransferDetector {
         // Calculate max drift from median
         $maxDrift = 0;
         foreach ($positions as $pos) {
-            $distance = $this->calculateDistanceNM($medianLat, $medianLon, $pos['lat'], $pos['lon']) * 1852; // Convert to meters
+            $distance = $this->calculateDistanceNM($medianLat, $medianLon, $pos['latitude'], $pos['longitude']) * 1852; // Convert to meters
             $maxDrift = max($maxDrift, $distance);
         }
         
@@ -1106,10 +1134,10 @@ class STSTransferDetector {
         
         $allTimestamps = [];
         foreach ($history1 as $pos) {
-            $allTimestamps[strtotime($pos['last_position_UTC'] ?? 0)] = 'v1';
+            $allTimestamps[strtotime($pos['posDt'] ?? 0)] = 'v1';
         }
         foreach ($history2 as $pos) {
-            $allTimestamps[strtotime($pos['last_position_UTC'] ?? 0)] = 'v2';
+            $allTimestamps[strtotime($pos['posDt'] ?? 0)] = 'v2';
         }
         
         ksort($allTimestamps);
@@ -1127,13 +1155,13 @@ class STSTransferDetector {
         if ($maxGap > self::AIS_GAP_NO_PENALTY_MINUTES && $gapStart && $gapEnd) {
             // Get positions before gap
             foreach ($history1 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
+                $posTime = strtotime($pos['posDt'] ?? 0);
                 if ($posTime <= $gapStart && $posTime >= $gapStart - 3600) { // Within 1 hour before gap
                     $result['pre_gap'][] = $pos;
                 }
             }
             foreach ($history2 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
+                $posTime = strtotime($pos['posDt'] ?? 0);
                 if ($posTime <= $gapStart && $posTime >= $gapStart - 3600) {
                     $result['pre_gap'][] = $pos;
                 }
@@ -1141,13 +1169,13 @@ class STSTransferDetector {
             
             // Get positions after gap
             foreach ($history1 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
+                $posTime = strtotime($pos['posDt'] ?? 0);
                 if ($posTime >= $gapEnd && $posTime <= $gapEnd + 3600) { // Within 1 hour after gap
                     $result['post_gap'][] = $pos;
                 }
             }
             foreach ($history2 as $pos) {
-                $posTime = strtotime($pos['last_position_UTC'] ?? 0);
+                $posTime = strtotime($pos['posDt'] ?? 0);
                 if ($posTime >= $gapEnd && $posTime <= $gapEnd + 3600) {
                     $result['post_gap'][] = $pos;
                 }
@@ -1166,8 +1194,8 @@ class STSTransferDetector {
                 }
                 if ($v1Pre && $v2Pre) {
                     $result['pre_gap_distance'] = $this->calculateDistanceNM(
-                        $v1Pre['lat'], $v1Pre['lon'],
-                        $v2Pre['lat'], $v2Pre['lon']
+                        $v1Pre['latitude'], $v1Pre['longitude'],
+                        $v2Pre['latitude'], $v2Pre['longitude']
                     );
                 }
             }
@@ -1184,8 +1212,8 @@ class STSTransferDetector {
                 }
                 if ($v1Post && $v2Post) {
                     $result['post_gap_distance'] = $this->calculateDistanceNM(
-                        $v1Post['lat'], $v1Post['lon'],
-                        $v2Post['lat'], $v2Post['lon']
+                        $v1Post['latitude'], $v1Post['longitude'],
+                        $v2Post['latitude'], $v2Post['longitude']
                     );
                 }
             }
@@ -1395,23 +1423,23 @@ class STSTransferDetector {
         // Filter data points within the specified time range
         if ($startDate && $endDate) {
             $history1 = array_filter($history1, function($point) use ($startDate, $endDate) {
-                $pointTime = strtotime($point['last_position_UTC'] ?? 0);
+                $pointTime = strtotime($point['posDt'] ?? 0);
                 return $pointTime >= strtotime($startDate) && $pointTime <= strtotime($endDate);
             });
             
             $history2 = array_filter($history2, function($point) use ($startDate, $endDate) {
-                $pointTime = strtotime($point['last_position_UTC'] ?? 0);
+                $pointTime = strtotime($point['posDt'] ?? 0);
                 return $pointTime >= strtotime($startDate) && $pointTime <= strtotime($endDate);
             });
         }
         
         // Sort by timestamp
         usort($history1, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+            return strtotime($a['posDt'] ?? 0) <=> strtotime($b['posDt'] ?? 0);
         });
         
         usort($history2, function($a, $b) {
-            return strtotime($a['last_position_UTC'] ?? 0) <=> strtotime($b['last_position_UTC'] ?? 0);
+            return strtotime($a['posDt'] ?? 0) <=> strtotime($b['posDt'] ?? 0);
         });
         
         // Group timestamps where both vessels are stationary
@@ -1425,16 +1453,16 @@ class STSTransferDetector {
             $point2 = $history2[$i];
             
             // Check if both vessels are stationary
-            $isStationary1 = $this->isStationary($point1['speed'] ?? 0);
-            $isStationary2 = $this->isStationary($point2['speed'] ?? 0);
+            $isStationary1 = $this->isStationary($point1['sog'] ?? 0);
+            $isStationary2 = $this->isStationary($point2['sog'] ?? 0);
             
             if ($isStationary1 && $isStationary2) {
                 if ($stationaryStart === null) {
-                    $stationaryStart = strtotime($point1['last_position_UTC']);
+                    $stationaryStart = strtotime($point1['posDt']);
                 }
             } else {
                 if ($stationaryStart !== null) {
-                    $stationaryEnd = strtotime($point1['last_position_UTC']);
+                    $stationaryEnd = strtotime($point1['posDt']);
                     $duration = ($stationaryEnd - $stationaryStart) / 3600; // Convert to hours
                     
                     if ($duration >= 0.5) { // Consider periods of at least 30 minutes
@@ -1453,7 +1481,7 @@ class STSTransferDetector {
         // If still stationary at the end
         if ($stationaryStart !== null && $minPoints > 0) {
             $lastPoint = $history1[$minPoints - 1];
-            $stationaryEnd = strtotime($lastPoint['last_position_UTC']);
+            $stationaryEnd = strtotime($lastPoint['posDt']);
             $duration = ($stationaryEnd - $stationaryStart) / 3600;
             
             if ($duration >= 0.5) {
@@ -1509,38 +1537,56 @@ class STSTransferDetector {
         if (!$mmsi) {
             return 0;
         }
-        
-        // Get historical data from 6 hours ago
-        $endpoint = $this->baseUrl . '/vessel_history';
-        $params = [
-            'api-key' => $this->apiKey,
-            'mmsi' => $mmsi,
-            'from' => date('Y-m-d\TH:i:s\Z', strtotime('-6 hours')),
-            'to' => date('Y-m-d\TH:i:s\Z', strtotime('-5 hours')), // 1-hour window
-            'limit' => 1
-        ];
-        
-        $url = $endpoint . '?' . http_build_query($params);
-        
+
         $ch = curl_init();
+        
+        $filter = "posDt BETWEEN '" . date('Y-m-d\TH:i:s\Z', strtotime('-6 hours')) . "' AND '" . date('Y-m-d\TH:i:s\Z', strtotime('-5 hours')) . "' 
+                   and mmsi=" . $mmsi;
+        
         curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
+            CURLOPT_URL            => "https://api.kpler.com/v2/maritime/ais-historical?filter=" . urlencode($filter),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => 'GET',
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Basic ' . $this->apiKey,
+            ],
         ]);
         
         $response = curl_exec($ch);
+        
+        if (curl_errno($ch)) {
+            throw new Exception('cURL Error: ' . curl_error($ch));
+        }
+        
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         
-        if ($httpCode === 200) {
-            $data = json_decode($response, true);
-            if (!empty($data['data'][0]['draught'])) {
-                return floatval($data['data'][0]['draught']);
-            }
+        if ($httpCode >= 400) {
+            throw new Exception("HTTP Error: " . $httpCode . " - " . $response);
         }
         
-        return 0;
+        $data = json_decode($response, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception("JSON Decode Error: " . json_last_error_msg());
+        }
+        
+        $features = $data["features"] ?? [];
+        $positions = [];
+        
+        $draught = 0;
+        foreach ($features as $feature) {
+            $properties = $feature['properties'] ?? [];
+            
+            $draught = $properties['draught'];
+            
+        }
+        
+        return $draught;
     }
 
      private $activeSTSVessels = [];
@@ -1578,7 +1624,7 @@ class STSTransferDetector {
      * Prepare vessel data for map display
      */
     private function prepareVesselForMap($vesselData, $forceVisible = false) {
-        $latestTimestamp = strtotime($vesselData['last_position_UTC'] ?? 0);
+        $latestTimestamp = strtotime($vesselData['posDt'] ?? 0);
         $currentTime = time();
         $minutesSinceLastSignal = ($currentTime - $latestTimestamp) / 60;
         
@@ -1586,13 +1632,13 @@ class STSTransferDetector {
             'mmsi' => $vesselData['mmsi'] ?? 'Unknown',
             'name' => $vesselData['name'] ?? 'Unknown',
             'type' => $vesselData['type'] ?? 'Unknown',
-            'lat' => $vesselData['lat'] ?? 0,
-            'lon' => $vesselData['lon'] ?? 0,
-            'speed' => $vesselData['speed'] ?? 0,
+            'latitude' => $vesselData['latitude'] ?? 0,
+            'longitude' => $vesselData['longitude'] ?? 0,
+            'sog' => $vesselData['sog'] ?? 0,
             'course' => $vesselData['course'] ?? 0,
             'heading' => $vesselData['heading'] ?? 0,
             'status' => $vesselData['status'] ?? 0,
-            'last_position' => $vesselData['last_position_UTC'] ?? '',
+            'last_position' => $vesselData['posDt'] ?? '',
             'force_visible' => $forceVisible,
             'ais_status' => $this->getAISStatus($minutesSinceLastSignal),
             'sts_active' => $forceVisible,
@@ -1647,9 +1693,9 @@ class STSTransferDetector {
         $popup = "<div class='vessel-popup'>";
         $popup .= "<h4>{$vesselData['name']} ({$vesselData['mmsi']})</h4>";
         $popup .= "<p><strong>Type:</strong> {$vesselData['type']}</p>";
-        $popup .= "<p><strong>Speed:</strong> " . round($vesselData['speed'] ?? 0, 1) . " knots</p>";
+        $popup .= "<p><strong>Speed:</strong> " . round($vesselData['sog'] ?? 0, 1) . " knots</p>";
         $popup .= "<p><strong>Course:</strong> " . round($vesselData['course'] ?? 0, 1) . "°</p>";
-        $popup .= "<p><strong>Last Position:</strong> {$vesselData['last_position_UTC']}</p>";
+        $popup .= "<p><strong>Last Position:</strong> {$vesselData['posDt']}</p>";
         $popup .= "<p><strong>AIS Status:</strong> <span class='ais-{$aisStatus['status']}'>{$aisStatus['message']}</span></p>";
         
         if ($stsActive) {
@@ -1691,7 +1737,7 @@ class STSTransferDetector {
      * Get minutes since last signal
      */
     private function getMinutesSinceLastSignal($vesselData) {
-        $latestTimestamp = strtotime($vesselData['last_position_UTC'] ?? 0);
+        $latestTimestamp = strtotime($vesselData['posDt'] ?? 0);
         $currentTime = time();
         return ($currentTime - $latestTimestamp) / 60;
     }
@@ -1798,7 +1844,7 @@ class STSTransferDetector {
                 'mmsi' => $vessel1['mmsi'] ?? 'Unknown',
                 'type' => $vessel1['type'] ?? 'Unknown',
                 'predicted_cargo' => $cargoType1,
-                'current_speed' => $vessel1['speed'] ?? 0,
+                'current_speed' => $vessel1['sog'] ?? 0,
                 'vessel_condition' => $vesselCondition1,
                 'cargo_eta' => $cargoETA1,
                 'vessel_owner' => $vesselOwner1,
@@ -1813,7 +1859,7 @@ class STSTransferDetector {
                 'mmsi' => $vessel2['mmsi'] ?? 'Unknown',
                 'type' => $vessel2['type'] ?? 'Unknown',
                 'predicted_cargo' => $cargoType2,
-                'current_speed' => $vessel2['speed'] ?? 0,
+                'current_speed' => $vessel2['sog'] ?? 0,
                 'vessel_condition' => $vesselCondition2,
                 'cargo_eta' => $cargoETA2,
                 'vessel_owner' => $vesselOwner2,
@@ -1879,31 +1925,59 @@ class STSTransferDetector {
      * Get vessel current information
      */
     private function getVesselInfo($mmsi) {
-        $endpoint = $this->baseUrl . '/vessel_pro';
+        sleep(1); 
         $params = [
-            'api-key' => $this->apiKey,
-            'mmsi' => $mmsi
+            "limit" => 1,
+            "filter" => 
+                "mmsi =  ".$mmsi
         ];
-        
-        $url = $endpoint . '?' . http_build_query($params);
-        
+
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
+            CURLOPT_URL => "https://api.kpler.com/v2/maritime/ais-latest",
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
             CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Basic dnh6YU1yelh0bXdxZ09EYldqem9ZSnhLN2ExdmpIc1k6RFo2YUoyeEU3YTlVZW5mbUw3VS1VMGI5c2czUTVDMUg5M1o0ZGVSVDhmenFvOERVeFgxZTdIWGxUMHVBTHpjYQ==',
+            ],
         ]);
-        
+
         $response = curl_exec($ch);
+
+        if (curl_errno($ch)) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        throw new Exception('cURL Error: ' . $error);
+        }
+
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        
-        if ($httpCode === 200) {
-            $data = json_decode($response, true);
-            return $data['data'] ?? null;
+
+        if ($httpCode >= 400) {
+            throw new Exception("HTTP Error: " . $httpCode . " - " . $response);
         }
         
-        return null;
+        $data = json_decode($response, true);
+    
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception("JSON Decode Error: " . json_last_error_msg());
+        }
+        
+        if( array_key_exists( 'features', $data ) ) {
+            if( count( $data['features'] ) > 0 ) {
+                if( array_key_exists( 'properties', $data['features'][0] ) ) {
+                    return $data['features'][0]['properties'];
+                }
+            }
+            
+        }
+        return false;
     }
     
     /**
