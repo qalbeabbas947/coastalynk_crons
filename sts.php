@@ -7,10 +7,10 @@ use function PHPSTORM_META\elementType;
 
 ini_set( "display_errors", "On" );
 error_reporting(E_ALL);
-define( 'ALLOWED_STS_RANGE_NM', 2.267819 ); //0.6479482
-define( 'ALLOWED_STS_RANGE_METERS', 4200 ); //1200
-define( 'ALLOWED_STS_END_RANGE_M', 4500 ); //1500
-define('ALLOWED_STS_END_RANGE_NM', 2.429806); // 1500 meters in nautical miles (~0.81 NM)
+define( 'ALLOWED_STS_RANGE_NM', 0.6479482 ); //0.6479482
+define( 'ALLOWED_STS_RANGE_METERS', 1200 ); //
+define( 'ALLOWED_STS_END_RANGE_M', 1500 ); //1500
+define('ALLOWED_STS_END_RANGE_NM', 0.8099352); // 1500 meters in nautical miles (~0.81 NM)
 define( 'ALLOWED_STS_MAX_TRANSFER_HOURS', 8 );
 define('ALLOWED_STS_END_DURATION_MINUTES', 20); // Time threshold for distance check
 
@@ -29,9 +29,9 @@ $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 if ($mysqli->connect_error) {
     die("Connection failed: " . $mysqli->connect_error);
 }
-
+ 
 $api_key                        = get_option_data('coatalynk_datalastic_apikey');
-$api_key                        = 'dnh6YU1yelh0bXdxZ09EYldqem9ZSnhLN2ExdmpIc1k6RFo2YUoyeEU3YTlVZW5mbUw3VS1VMGI5c2czUTVDMUg5M1o0ZGVSVDhmenFvOERVeFgxZTdIWGxUMHVBTHpjYQ==';
+$api_key                        = 'dnh6YU1yelh0bXdxZ09EYldqem9ZSnhLN2ExdmpIc1k6ZnI0TzZtZ09sbzJONWVNNjRLZU0zSUtLMjFwSm8tc1J5ZFZaU05YcjlPWjFMeUZUN2FnRjFhbUkxbHRpZnA1Ng==';
 $siteurl                        = get_option_data('siteurl');
 $coatalynk_site_admin_email 	= get_option_data('coatalynk_site_admin_email');
 $coatalynk_npa_admin_email 	    = get_option_data( 'coatalynk_npa_admin_email' );
@@ -217,7 +217,9 @@ if ($result = $mysqli->query($sql)) {
 $sql = "select *, ST_AsText(port_area) as port_area_text from ".$table_name." where country_iso='NG' and port_type in( 'data_polygons' ) and port_id='".$param_pid."' order by title";
 $i = 0;
 if ($result = $mysqli->query($sql)) {
-    if ( $obj = $result->fetch_object() ) { 
+    if ( $obj = $result->fetch_object() ) {
+        $port_id = $obj->port_id;
+        $port_name = $obj->title;
         $mt_polygon = $obj->port_area_text;
     }
 }
@@ -258,7 +260,7 @@ function retrieve_polygon_vessels( $polygon, $limit=500 ) {
     curl_close($ch);
 
     if ($httpCode >= 400) {
-    throw new Exception("HTTP Error: " . $httpCode . " - " . $response);
+        throw new Exception("HTTP Error: " . $httpCode . " - " . $response);
     }
     
     $data = json_decode($response, true);
@@ -270,7 +272,7 @@ function retrieve_polygon_vessels( $polygon, $limit=500 ) {
     return $data;
 }
 
-$vessels_list = retrieve_polygon_vessels( $mt_polygon );
+$vessels_list = retrieve_polygon_vessels( $mt_polygon,1000 );
 $result->free();
 
 $event_table_mother = $table_prefix . 'coastalynk_sts_events';
@@ -339,7 +341,7 @@ $sql = "CREATE TABLE IF NOT EXISTS `".$event_table_daughter."` (
   `ais_continuity` enum('','Good','Weak','Delayed','Lost/Dark') DEFAULT '',
   `proximity_signal` enum('','Sustained','Weak','Interrupted') DEFAULT '',
   `draught_evidence` enum('','Available','AIS-Limited') DEFAULT '',
-   confidence_string enum('','High','Medium','Low') DEFAULT '',
+   confidence_string enum('','High','Moderate','Medium','Low') DEFAULT '',
   `joining_date` timestamp NULL DEFAULT NULL,
    lock_time timestamp NULL DEFAULT NULL,
   `end_date` timestamp NULL DEFAULT NULL,
@@ -372,8 +374,8 @@ if ( $mysqli->query($sql) !== TRUE ) {
     echo "Error: " . $sql . "\n" . $mysqli->error;
 }
 
-$sql = "ALTER TABLE `".$event_table_daughter."` ADD COLUMN IF NOT EXISTS `event_type` varchar(50) DEFAULT 'Vessel Interaction Detected'";
-$mysqli->query($sql);
+// $sql = "ALTER TABLE `".$event_table_daughter."` ADD COLUMN IF NOT EXISTS `event_type` varchar(50) DEFAULT 'Vessel Interaction Detected'";
+// $mysqli->query($sql);
 
 function determineMother($vessel1, $vessel2, $mmsi1, $mmsi2) {
     // Priority 1: Higher DWT
@@ -458,8 +460,17 @@ $total_allowed = 0;
 echo '<br><pre>Total vessels:'.$vessels_list['numberReturned'].'\n';
 if( isset( $vessels_list ) && isset( $vessels_list['features'] ) && isset( $vessels_list['numberReturned'] ) && intval( $vessels_list['numberReturned'] ) > 0 ) {
     $vessels = $vessels_list['features'];
-    //echo '<pre>'; print_r($vessels);echo '</pre>';
-    //Check proximity
+    $types = [];
+    foreach ($vessels as $v1_data) {
+        $types[$v1_data['properties']['vesselType']] = $v1_data['properties']['vesselType'];
+    }
+
+    $daughter_tanker_types = $tanker_types = ['Tanker - Hazard D (Recognizable)', 'Tanker - Hazard D', 'Tanker - Hazard C (Minor)', 'Tanker - Hazard B', 'Inland Tanker', 'Other Tanker','Special Tanker','Asphalt/Bitumen Tanker','Oil/Chemical Tanker', 'Chemical Tanker','Bunkering Tanker','Oil Products Tanker','Edible Oil Tanker','LPG Tanker','Tanker','Crude Oil Tanker','LPG/Chemical Tanker','Inland, Motor Tanker','Tanker - Hazard A (Major)','Tank Barge','Inland, Motor Tanker, liquid cargo, type N','LNG Tanker'];
+    $daughter_tanker_types[] = 'Inland, Motor Tanker';
+    $daughter_tanker_types[] = 'Inland, Unknown';
+    $daughter_tanker_types[] = 'Inland Freighter / Cargo';
+    
+    //Check proximit
     $final_array = [];
     foreach ($vessels as $v1_data) {
         $item_count_main++;
@@ -468,13 +479,13 @@ if( isset( $vessels_list ) && isset( $vessels_list['features'] ) && isset( $vess
         
         $vessel_array = [$v1['mmsi'] => ['vesselUid'=> $v1['vesselUid'], 'vesselName'=> $v1['vesselName'], 'navigation_status'=> $v1['navStatus'], 'sog'=> $v1['sog'], 'dwt'=> $v1['dwt'], 'mmsi'=> $v1['mmsi'], 'length'=> $v1['length'], 'imo'=> $v1['imo'], 'longitude'=> $v1['longitude'], 'latitude'=> $v1['latitude'], 'cog'=> $v1['cog'], 'rot'=> $v1['rot'], 'heading'=> $v1['heading'], 'navStatus'=> $v1['navStatus'], 'posMsgType'=> $v1['posMsgType'], 'posSrc'=> $v1['posSrc'], 'callsign'=> $v1['callsign'], 'flag'=> $v1['flag'], 'vesselTypeAis'=> $v1['vesselTypeAis'], 'vesselType'=> $v1['vesselType'], 'width'=> $v1['width'], 'grt'=> $v1['grt'], 'destination'=> $v1['destination'], 'eta'=> $v1['eta'], 'draught'=> $v1['draught'], 'staticMsgType'=> $v1['staticMsgType'], 'staticSrc'=> $v1['staticSrc'], 'posDt'=> $v1['posDt'], 'first'=> 'yes']];
 
-        if( !empty( $v1['vesselType'] ) && ( str_contains($v1['vesselType'], 'Tanker') || in_array( $v1['vesselType'], ['Patrol Vessel', 'Tanker','Oil/Chemical Tanker','Asphalt/Bitumen Tanker','Bunkering Tanker','Chemical Tanker','Crude Oil Tanker','LNG Tanker','LPG Tanker', 'Oil Products Tanker', 'Special Tanker', 'Water Tanker', 'Inland Tanker', 'Other Tanker' ] ) ) ) {
+        if( !empty( $v1['vesselType'] ) && ( str_contains($v2['vesselName'], 'Tanker') || str_contains($v1['vesselType'], 'Tanker') || in_array( $v1['vesselType'], $tanker_types ) ) ) {
             $event_id = 0;
             $daughter_id = 0;
             foreach ($vessels as $v2_data) {
                 $item_count_sub++;
                 $v2 = $v2_data['properties'];
-                if ($v1['vesselUid'] != $v2['vesselUid'] && !empty( $v2['vesselType'] ) && ( str_contains($v2['vesselType'], 'Tanker') || in_array( $v2['vesselType'], ['Patrol Vessel', 'Tanker','Oil/Chemical Tanker','Asphalt/Bitumen Tanker','Bunkering Tanker','Chemical Tanker','Crude Oil Tanker','LNG Tanker','LPG Tanker', 'Oil Products Tanker', 'Special Tanker', 'Water Tanker', 'Inland Tanker', 'Other Tanker' ] ) ) ) { // && $total_allowed < 1
+                if ($v1['vesselUid'] != $v2['vesselUid'] && !empty( $v2['vesselType'] ) && ( str_contains($v2['vesselName'], 'Tanker') || str_contains($v2['vesselType'], 'Tanker') || in_array( $v2['vesselType'], $daughter_tanker_types ) ) ) { // && $total_allowed < 1
                     $new_entry = false;
                     $row = false;
 
@@ -799,19 +810,19 @@ if( isset( $vessels_list ) && isset( $vessels_list['features'] ) && isset( $vess
                             $pk_id = intval($result2->fetch_column());
                             $result2->free();
                             $ref_id = 'STS'.date('Ymd').str_pad( $pk_id, strlen( $pk_id ) + 4, '0', STR_PAD_LEFT);
-                            echo '<pre>';print_r($detectresult);
+                           // echo '<pre>';print_r($detectresult);
                             $stationary_duration_hours  = $detectresult[ 'proximity_analysis' ][ 'stationary_duration_hours' ];
                             $stationary_duration_mins   = ( floatval( $stationary_duration_hours ) * 60 );
                             $proximity_consistency      = $detectresult['proximity_analysis']['proximity_consistency'];
                             $data_points_analyzed       = $detectresult['proximity_analysis']['data_points_analyzed'];
                             
-                            $risk_level     = $detectresult['evidence_assessment']['risk_level'];
+                            $risk_level     = $detectresult['risk_assessment']['risk_level'];
 
                             $ais_continuity_v1     = $detectresult['evidence_assessment']['ais_continuity_v1'];
                             $ais_continuity_v2     = $detectresult['evidence_assessment']['ais_continuity_v2'];
                             $draught_evidence     = $detectresult['evidence_assessment']['draught_evidence'];
                             $proximity_signal     = $detectresult['evidence_assessment']['proximity_signal'];
-                            $confidence_string     = $detectresult['risk_assessment']['confidence_string'];
+                            $confidence_string     = $detectresult['risk_assessment']['confidence'];
                             
                             $remarks        = $detectresult['risk_assessment']['remarks'];
                             $confidence     = $detectresult['risk_assessment']['confidence'];
@@ -820,7 +831,14 @@ if( isset( $vessels_list ) && isset( $vessels_list['features'] ) && isset( $vess
                                 $dateTime = new DateTime();
                                 $dateTime->setTimestamp(intval($lock_time));
                                 $mysqlDate = $dateTime->format('Y-m-d H:i:s');
-                                $lock_time = "'".$mysqlDate."'";
+
+                                $date_limit    = new DateTime("01/01/2020");
+                                if( $dateTime > $date_limit ) {
+                                    $lock_time = "'".$mysqlDate."'";
+                                } else {
+                                    $lock_time = "Null";
+                                }
+                                
                             } else {
                                 $lock_time = 'Null';
                             }
@@ -922,7 +940,7 @@ if( isset( $vessels_list ) && isset( $vessels_list['features'] ) && isset( $vess
 
                             if( $event_id > 0 ) {
 
-                                $sql = "SELECT id from ".$event_table_daughter." where event_id = '".$mysqli->real_escape_string($event_id)."' and mmsi='".$mysqli->real_escape_string($vehicel_2['mmsi'])."'";
+                                $sql = "SELECT id from ".$event_table_daughter." where event_id = '".$mysqli->real_escape_string($event_id)."' and ( mmsi='".$mysqli->real_escape_string($vehicel_2['mmsi'])."' or  mmsi='".$mysqli->real_escape_string($vehicel_1['mmsi'])."')";
                                 $result_event_id = $mysqli->query( $sql );
                                 $num_rows = mysqli_num_rows( $result_event_id );
 
@@ -1163,7 +1181,7 @@ $result3 = $mysqli->query( $sql );
 $num_rows = mysqli_num_rows( $result3 );
 if( $num_rows > 0 ) {
     while( $row = mysqli_fetch_array($result3, MYSQLI_ASSOC) ) {
-        
+       // echo '<pre>';print_r($row);echo '</pre>';
         $dateTime1 = new DateTime($row['end_date']);
         $dateTime2 = new DateTime();
         $interval = $dateTime2->diff($dateTime1);
@@ -1338,14 +1356,15 @@ $result3->free();
 if( count( $array_ids ) == 0 ) {
     $array_ids[] = 0;
 }
-
+//docker exec wp_app php -d memory_limit=512M /var/www/html/coastalynk_crons/sts-predictions.php
+//php -d memory_limit=512M sts.php ZONE_CALABAR 
 if( count( $array_daughter_ids ) == 0 ) {
     $array_daughter_ids[] = 0;
 }
 $array_daughter_ids = [0];
 if( count( $array_daughter_ids ) > 0 ) {
     $array_ids_implode = implode( ',', array_unique($array_daughter_ids) );
-    $sql = "select e.id, d.id as did, d.status as daughter_status, d.event_id, e.deadweight as vessel1_deadweight, d.deadweight as vessel2_deadweight, e.port, e.zone_type, e.uuid as vessel1_uuid, e.zone_terminal_name, e.name as vessel1_name, d.name as vessel2_name, e.mmsi as vessel1_mmsi, d.mmsi as vessel2_mmsi, d.uuid as vessel2_uuid, e.end_date, e.draught as vessel1_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, d.draught as vessel2_draught, e.completed_draught as vessel1_completed_draught, d.completed_draught as vessel2_completed_draught from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where e.port='".$port_name."' and e.status = 'Detected' and d.id not in (".$array_ids_implode.") and e.is_complete = 'No' and d.step = 0;";
+    echo $sql = "select e.id, d.id as did, d.status as daughter_status, d.event_id, e.deadweight as vessel1_deadweight, d.deadweight as vessel2_deadweight, e.port, e.zone_type, e.uuid as vessel1_uuid, e.zone_terminal_name, e.name as vessel1_name, d.name as vessel2_name, e.mmsi as vessel1_mmsi, d.mmsi as vessel2_mmsi, d.uuid as vessel2_uuid, e.end_date, e.draught as vessel1_draught, e.last_position_UTC as vessel1_last_position_UTC, d.last_position_UTC as vessel2_last_position_UTC, d.draught as vessel2_draught, e.completed_draught as vessel1_completed_draught, d.completed_draught as vessel2_completed_draught from ".$event_table_mother." as e inner join ".$event_table_daughter." as d on(e.id=d.event_id) where e.port='".$port_name."' and e.status = 'Detected' and d.id not in (".$array_ids_implode.") and e.is_complete = 'No' and d.step = 0;";
 
     $result4 = $mysqli->query( $sql );
     $num_rows = mysqli_num_rows( $result4 );

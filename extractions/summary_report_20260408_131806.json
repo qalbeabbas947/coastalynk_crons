@@ -1,0 +1,26 @@
+{
+    "barges": {
+        "lagos_outer_anchorage": {
+            "total_vessels": 0,
+            "total_dwell_hours": 0,
+            "avg_dwell_hours": 0
+        },
+        "dawes_creek": {
+            "total_vessels": 0,
+            "total_dwell_hours": 0,
+            "avg_dwell_hours": 0
+        }
+    },
+    "tankers": {
+        "lagos_outer_anchorage": {
+            "total_vessels": 0,
+            "total_dwell_hours": 0,
+            "avg_dwell_hours": 0
+        },
+        "dawes_creek": {
+            "total_vessels": 0,
+            "total_dwell_hours": 0,
+            "avg_dwell_hours": 0
+        }
+    }
+}
